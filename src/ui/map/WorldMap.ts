@@ -1,6 +1,9 @@
 import type { WorldState } from '../../simulation/WorldState'
 import {
+  WORLD_BRIDGES,
+  WORLD_FIRES,
   WORLD_LIMIT,
+  WORLD_ROADS,
   WORLD_ZONES,
   RIVER_HALF_WIDTH,
   riverCenterZ,
@@ -44,8 +47,11 @@ export class WorldMap {
         <footer class="world-map__legend">
           <span><i class="world-map__dot world-map__dot--player"></i>ты</span>
           <span><i class="world-map__dot world-map__dot--enemy"></i>враг</span>
+          <span>━ дорога</span>
+          <span>═ мост</span>
           <span>▲ монолит</span>
           <span>□ руины</span>
+          <span>▣ башня</span>
           <span>· лес</span>
         </footer>
       </div>
@@ -163,6 +169,7 @@ export class WorldMap {
 
     this.ctx.font = '11px ui-monospace, monospace'
     this.ctx.fillStyle = 'rgba(235,240,236,.72)'
+    this.ctx.textAlign = 'left'
     this.ctx.fillText(`${world.currentZone.name} · ${world.player.x.toFixed(0)}, ${world.player.z.toFixed(0)}`, 14, cssSize - 14)
   }
 
@@ -192,20 +199,53 @@ export class WorldMap {
       }
     }
 
-    ctx.lineWidth = Math.max(5, size * 0.011)
-    ctx.strokeStyle = 'rgba(82,114,126,.62)'
-    ctx.beginPath()
+    const riverPath = new Path2D()
     let first = true
     for (let x = -WORLD_LIMIT - 8; x <= WORLD_LIMIT + 8; x += 1.25) {
       const z = riverCenterZ(x)
       const sx = map(x)
       const sy = size - map(z)
       if (first) {
-        ctx.moveTo(sx, sy)
+        riverPath.moveTo(sx, sy)
         first = false
-      } else ctx.lineTo(sx, sy)
+      } else riverPath.lineTo(sx, sy)
     }
-    ctx.stroke()
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+    ctx.lineWidth = Math.max(7, (RIVER_HALF_WIDTH * 2 / (WORLD_LIMIT * 2)) * size)
+    ctx.strokeStyle = 'rgba(44,70,79,.72)'
+    ctx.stroke(riverPath)
+    ctx.lineWidth = Math.max(1.5, size * 0.003)
+    ctx.strokeStyle = 'rgba(133,170,181,.56)'
+    ctx.stroke(riverPath)
+
+    for (const road of WORLD_ROADS) {
+      ctx.beginPath()
+      road.points.forEach((point, index) => {
+        const x = map(point[0])
+        const y = size - map(point[1])
+        if (index === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      })
+      ctx.lineWidth = Math.max(2, (road.width / (WORLD_LIMIT * 2)) * size)
+      ctx.strokeStyle = 'rgba(178,157,119,.62)'
+      ctx.stroke()
+      ctx.lineWidth = Math.max(0.8, ctx.lineWidth * 0.24)
+      ctx.strokeStyle = 'rgba(231,216,180,.35)'
+      ctx.stroke()
+    }
+
+    for (const bridge of WORLD_BRIDGES) {
+      const x = map(bridge.x)
+      const y = size - map(bridge.z)
+      const scale = size / (WORLD_LIMIT * 2)
+      ctx.save()
+      ctx.translate(x, y)
+      ctx.rotate(-bridge.rotation)
+      ctx.fillStyle = bridge.style === 'stone' ? 'rgba(218,211,190,.9)' : 'rgba(166,116,73,.88)'
+      ctx.fillRect(-bridge.width * scale * 0.5, -bridge.length * scale * 0.5, bridge.width * scale, bridge.length * scale)
+      ctx.restore()
+    }
 
     ctx.lineWidth = Math.max(1, size * 0.002)
     for (const zone of WORLD_ZONES) {
@@ -214,7 +254,7 @@ export class WorldMap {
       const zr = (zone.radius / (WORLD_LIMIT * 2)) * size
       ctx.beginPath()
       ctx.arc(zx, zy, zr, 0, Math.PI * 2)
-      ctx.strokeStyle = 'rgba(188,204,193,.12)'
+      ctx.strokeStyle = 'rgba(188,204,193,.1)'
       ctx.setLineDash([4, 6])
       ctx.stroke()
       ctx.setLineDash([])
@@ -230,9 +270,14 @@ export class WorldMap {
       if (landmark.kind === 'tree') {
         ctx.fillStyle = 'rgba(104,142,109,.58)'
         ctx.fillRect(x, y, 1.5, 1.5)
-      } else if (landmark.kind === 'ruin') {
+      } else if (landmark.kind === 'ruin' || landmark.kind === 'gate') {
         ctx.strokeStyle = 'rgba(202,193,174,.74)'
         ctx.strokeRect(x - 2.5, y - 2.5, 5, 5)
+      } else if (landmark.kind === 'tower') {
+        ctx.fillStyle = 'rgba(204,199,184,.78)'
+        ctx.fillRect(x - 2.8, y - 2.8, 5.6, 5.6)
+        ctx.strokeStyle = 'rgba(238,232,214,.6)'
+        ctx.strokeRect(x - 3.5, y - 3.5, 7, 7)
       } else if (landmark.kind === 'monolith') {
         ctx.fillStyle = 'rgba(218,215,199,.82)'
         ctx.beginPath()
@@ -249,16 +294,21 @@ export class WorldMap {
       }
     }
 
+    for (const fire of WORLD_FIRES) {
+      const x = map(fire.x)
+      const y = size - map(fire.z)
+      ctx.beginPath()
+      ctx.arc(x, y, 2.1, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(230,150,55,.9)'
+      ctx.shadowColor = 'rgba(235,137,42,.6)'
+      ctx.shadowBlur = 7
+      ctx.fill()
+    }
+    ctx.shadowBlur = 0
+
     ctx.strokeStyle = 'rgba(224,233,226,.22)'
     ctx.lineWidth = 1
     ctx.strokeRect(0.5, 0.5, size - 1, size - 1)
-
-    // Hint at the river's physical width without making the map look like a UI diagram.
-    ctx.globalAlpha = 0.18
-    ctx.lineWidth = Math.max(1, (RIVER_HALF_WIDTH / WORLD_LIMIT) * size)
-    ctx.strokeStyle = '#b7d8df'
-    ctx.stroke()
-    ctx.globalAlpha = 1
 
     return layer
   }
