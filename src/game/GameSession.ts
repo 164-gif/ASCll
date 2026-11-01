@@ -1,9 +1,9 @@
 import '../gameplay.css'
 import { InputController } from '../input/InputController'
-import { WorldRenderer } from '../render/world/WorldRendererV2'
+import { WorldRenderer } from '../render/world/WorldRenderer'
 import { WorldState } from '../simulation/WorldState'
 import { GameHud } from '../ui/hud/GameHud'
-import { WorldMap } from '../ui/map/WorldMapV2'
+import { WorldMap } from '../ui/map/WorldMap'
 
 const FIXED_STEP = 1 / 60
 
