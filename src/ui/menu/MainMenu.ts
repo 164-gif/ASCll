@@ -6,66 +6,70 @@ export class MainMenu {
   private readonly fullscreen: FullscreenController
   private readonly settings: SettingsDialog
   private unsubscribeFullscreen: (() => void) | null = null
+  private selectedIndex = 0
 
   private readonly handleKeydown = (event: KeyboardEvent): void => {
     if (event.key === 'F11') {
       event.preventDefault()
       void this.fullscreen.toggle()
+      return
+    }
+
+    if (this.settings.element.open) return
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      this.moveSelection(event.key === 'ArrowDown' ? 1 : -1)
+      return
+    }
+
+    if (event.key === 'Enter') {
+      const buttons = this.getAvailableActions()
+      buttons[this.selectedIndex]?.click()
     }
   }
 
   constructor(fullscreen: FullscreenController, onMotionPreference: (enabled: boolean) => void) {
     this.fullscreen = fullscreen
-    this.settings = new SettingsDialog(onMotionPreference)
+    this.settings = new SettingsDialog(fullscreen, onMotionPreference)
     this.element = document.createElement('main')
     this.element.className = 'main-menu main-menu--waiting'
 
     this.element.innerHTML = `
       <header class="menu-topbar">
-        <div class="menu-id" aria-label="Build information">
-          <span class="menu-id__mark">A:</span>
-          <span>WORLD INTERFACE // 0001</span>
-        </div>
-        <button class="fullscreen-button" type="button" aria-label="Enter fullscreen" title="Fullscreen (F11)">
+        <span class="menu-wordmark">ascii</span>
+        <button class="fullscreen-button" type="button" aria-label="Полноэкранный режим" title="F11">
           <span class="fullscreen-button__corners" aria-hidden="true"></span>
-          <span class="fullscreen-button__label">FULLSCREEN</span>
+          <span class="fullscreen-button__label">полный экран</span>
         </button>
       </header>
 
-      <section class="menu-content" aria-labelledby="game-title">
-        <div class="brand-lockup">
-          <div class="brand-sigil" aria-hidden="true">
-            <span class="brand-sigil__ring">/\\:|·:/\\:|·:/\\:|·:</span>
-            <span class="brand-sigil__core">A</span>
-          </div>
-          <p class="brand-kicker">SIGNAL ACQUIRED</p>
-          <h1 id="game-title" data-text="ASCII" aria-label="ASCII">ASCII</h1>
-          <p class="brand-subtitle">WORLD WITHOUT PIXELS</p>
-        </div>
-
-        <nav class="menu-actions" aria-label="Main menu">
-          <button class="menu-action menu-action--primary" type="button" data-action="enter">
-            <span class="menu-action__index">[01]</span>
-            <span class="menu-action__label">ENTER WORLD</span>
-            <span class="menu-action__signal" aria-hidden="true">//////</span>
+      <section class="menu-content" aria-label="Главное меню">
+        <p class="menu-caption">главное меню</p>
+        <nav class="menu-actions" aria-label="Главное меню">
+          <button class="menu-action is-selected" type="button" data-action="new-game">
+            <span class="menu-action__label">Новая игра</span>
+          </button>
+          <button class="menu-action" type="button" data-action="continue" disabled>
+            <span class="menu-action__label">Продолжить</span>
+          </button>
+          <button class="menu-action" type="button" data-action="load" disabled>
+            <span class="menu-action__label">Загрузить</span>
           </button>
           <button class="menu-action" type="button" data-action="settings">
-            <span class="menu-action__index">[02]</span>
-            <span class="menu-action__label">SETTINGS</span>
-            <span class="menu-action__signal" aria-hidden="true">::..::</span>
+            <span class="menu-action__label">Настройки</span>
+          </button>
+          <button class="menu-action" type="button" data-action="exit">
+            <span class="menu-action__label">Выход</span>
           </button>
         </nav>
+        <p class="menu-version">0.1.0</p>
       </section>
 
       <footer class="menu-footer">
-        <span>PRE-ALPHA // BUILD 0.1.0</span>
-        <span class="menu-footer__hint">↑ ↓ SELECT&nbsp;&nbsp;&nbsp; ENTER CONFIRM&nbsp;&nbsp;&nbsp; F11 FULLSCREEN</span>
+        <span>↑↓ выбор&nbsp;&nbsp; enter подтвердить</span>
+        <span>pre-alpha</span>
       </footer>
-
-      <div class="prototype-toast" role="status" aria-live="polite">
-        <span class="prototype-toast__glyph">[//]</span>
-        <span>WORLD CORE IS NOT CONNECTED YET</span>
-      </div>
     `
 
     this.element.append(this.settings.element)
@@ -76,38 +80,69 @@ export class MainMenu {
     requestAnimationFrame(() => {
       this.element.classList.remove('main-menu--waiting')
       this.element.classList.add('main-menu--ready')
+      this.syncSelection()
     })
   }
 
   destroy(): void {
     this.unsubscribeFullscreen?.()
+    this.settings.destroy()
     window.removeEventListener('keydown', this.handleKeydown)
   }
 
   private bind(): void {
     const fullscreenButton = this.element.querySelector<HTMLButtonElement>('.fullscreen-button')
-    const enterButton = this.element.querySelector<HTMLButtonElement>('[data-action="enter"]')
     const settingsButton = this.element.querySelector<HTMLButtonElement>('[data-action="settings"]')
-    const toast = this.element.querySelector<HTMLElement>('.prototype-toast')
+    const newGameButton = this.element.querySelector<HTMLButtonElement>('[data-action="new-game"]')
+    const exitButton = this.element.querySelector<HTMLButtonElement>('[data-action="exit"]')
 
     fullscreenButton?.addEventListener('click', () => void this.fullscreen.toggle())
     settingsButton?.addEventListener('click', () => this.settings.open())
-    enterButton?.addEventListener('click', () => {
-      this.element.classList.add('main-menu--pulse')
-      window.setTimeout(() => this.element.classList.remove('main-menu--pulse'), 540)
-      toast?.classList.remove('prototype-toast--visible')
-      window.setTimeout(() => toast?.classList.add('prototype-toast--visible'), 120)
-      window.setTimeout(() => toast?.classList.remove('prototype-toast--visible'), 2500)
+    newGameButton?.addEventListener('click', () => {
+      this.element.classList.add('main-menu--departing')
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('ascii:new-game'))
+        this.element.classList.remove('main-menu--departing')
+      }, 520)
     })
+    exitButton?.addEventListener('click', () => {
+      if (window.history.length > 1) window.history.back()
+    })
+
+    for (const button of this.getAvailableActions()) {
+      button.addEventListener('pointerenter', () => {
+        const buttons = this.getAvailableActions()
+        const index = buttons.indexOf(button)
+        if (index >= 0) {
+          this.selectedIndex = index
+          this.syncSelection()
+        }
+      })
+    }
 
     this.unsubscribeFullscreen = this.fullscreen.subscribe((active) => {
       if (!fullscreenButton) return
       fullscreenButton.classList.toggle('fullscreen-button--active', active)
-      fullscreenButton.setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen')
       const label = fullscreenButton.querySelector<HTMLElement>('.fullscreen-button__label')
-      if (label) label.textContent = active ? 'WINDOWED' : 'FULLSCREEN'
+      if (label) label.textContent = active ? 'оконный режим' : 'полный экран'
     })
 
     window.addEventListener('keydown', this.handleKeydown)
+  }
+
+  private getAvailableActions(): HTMLButtonElement[] {
+    return Array.from(this.element.querySelectorAll<HTMLButtonElement>('.menu-action:not(:disabled)'))
+  }
+
+  private moveSelection(direction: number): void {
+    const buttons = this.getAvailableActions()
+    if (buttons.length === 0) return
+    this.selectedIndex = (this.selectedIndex + direction + buttons.length) % buttons.length
+    this.syncSelection()
+  }
+
+  private syncSelection(): void {
+    const buttons = this.getAvailableActions()
+    buttons.forEach((button, index) => button.classList.toggle('is-selected', index === this.selectedIndex))
   }
 }
