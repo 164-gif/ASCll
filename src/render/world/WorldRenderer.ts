@@ -1,91 +1,93 @@
 import * as THREE from 'three'
-import type { EnemyState, WorldState } from '../../simulation/WorldState'
+import { isInsideRiver, riverSignedDistance, type EnemyState, type WorldState } from '../../simulation/WorldState'
+import { createAsciiAtlas } from './AsciiAtlas'
+import {
+  grassFragmentShader,
+  grassVertexShader,
+  groundFragmentShader,
+  groundVertexShader,
+  objectFragmentShader,
+  objectVertexShader,
+} from './AsciiShaders'
 
-const GLYPH_RAMP = ['.', '·', ':', ';', '/', '\\', '|', '+', '*', '%', '#', '@']
+const BASE_FRUSTUM = 21
+const MAX_RIPPLES = 18
 
-const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
-
-const toDisplayChannel = (value: number): number => {
-  const linear = clamp01(value / 255)
-  const lifted = Math.pow(linear, 1 / 2.15)
-  return Math.round(clamp01(lifted * 1.18 + 0.018) * 255)
+type ObjectMaterial = THREE.ShaderMaterial & {
+  uniforms: THREE.ShaderMaterial['uniforms'] & {
+    uBaseColor: { value: THREE.Color }
+    uDarkColor: { value: THREE.Color }
+    uCharOffset: { value: number }
+    uEmissive: { value: number }
+  }
 }
 
 export class WorldRenderer {
   readonly element: HTMLCanvasElement
 
   private readonly scene = new THREE.Scene()
-  private readonly camera = new THREE.PerspectiveCamera(49, 1, 0.1, 120)
-  private readonly renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' })
-  private readonly target = new THREE.WebGLRenderTarget(88, 50, {
-    depthBuffer: true,
-    stencilBuffer: false,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-  })
-  private readonly ctx: CanvasRenderingContext2D
+  private readonly camera = new THREE.OrthographicCamera(-10, 10, 10, -10, -100, 200)
+  private readonly renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
   private readonly resizeObserver: ResizeObserver
+  private readonly atlas = createAsciiAtlas()
   private readonly playerGroup = new THREE.Group()
-  private readonly playerLight = new THREE.PointLight(0xc4dfcf, 8.5, 15, 1.55)
-  private readonly attackRing: THREE.Mesh
   private readonly enemyMeshes = new Map<number, THREE.Group>()
+  private readonly objectMaterials: ObjectMaterial[] = []
+  private readonly ripples = Array.from({ length: MAX_RIPPLES }, () => new THREE.Vector4(999, 999, 0, 0))
+  private readonly camRight = new THREE.Vector3(1, 0, 0)
+  private readonly camUp = new THREE.Vector3(0, 1, 0)
+  private readonly torchPos = new THREE.Vector3()
 
-  private width = 1
-  private height = 1
-  private dpr = 1
-  private cols = 88
-  private rows = 50
-  private pixels = new Uint8Array(this.cols * this.rows * 4)
+  private readonly shared = {
+    uAsciiTex: { value: this.atlas },
+    uCamRight: { value: this.camRight },
+    uCamUp: { value: this.camUp },
+    uTime: { value: 0 },
+    uPlayerPos: { value: new THREE.Vector3() },
+    uTorchPos: { value: this.torchPos },
+    uTorchPower: { value: 0 },
+    uRipples: { value: this.ripples },
+    uSwingTime: { value: 0 },
+  }
+
+  private capeMesh: THREE.Mesh | null = null
+  private leftLeg: THREE.Mesh | null = null
+  private rightLeg: THREE.Mesh | null = null
+  private rightArm: THREE.Group | null = null
+  private slashMesh: THREE.Mesh | null = null
+  private rippleCursor = 0
+  private currentZoom = 1.15
+  private targetZoom = 1.15
+  private walkCycle = 0
+  private lastX = -0.5
+  private lastZ = 2.2
+  private lastAttackPulse = 0
+  private stepDistance = 0
+  private disposed = false
 
   constructor(parent: HTMLElement, world: WorldState) {
-    this.element = document.createElement('canvas')
-    this.element.className = 'world-glyph-canvas'
-    const context = this.element.getContext('2d', { alpha: false })
-    if (!context) throw new Error('Glyph canvas is unavailable')
-    this.ctx = context
-    parent.append(this.element)
+    this.scene.background = new THREE.Color(0x050706)
 
-    this.scene.background = new THREE.Color(0x020604)
-    this.scene.fog = new THREE.FogExp2(0x020604, 0.019)
-    this.camera.position.set(7.1, 8.3, 8.9)
-
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+    this.renderer.setSize(16, 16, false)
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 2.15
-    this.renderer.setPixelRatio(1)
-    this.renderer.setSize(16, 16, false)
+    this.renderer.toneMappingExposure = 1.08
 
-    const hemi = new THREE.HemisphereLight(0xb7c9c5, 0x15251c, 3.1)
-    this.scene.add(hemi)
+    this.element = this.renderer.domElement
+    this.element.className = 'world-glyph-canvas'
+    parent.append(this.element)
 
-    const moon = new THREE.DirectionalLight(0xd5e5ee, 4.2)
-    moon.position.set(-9, 17, 6)
-    this.scene.add(moon)
-
-    const fill = new THREE.DirectionalLight(0x6d8f79, 1.55)
-    fill.position.set(10, 7, -12)
-    this.scene.add(fill)
-
-    this.playerLight.position.set(0, 2.2, 0)
-    this.scene.add(this.playerLight)
+    this.camera.position.set(0, 26, 22)
+    this.camera.lookAt(0, 0, 0)
+    this.camera.zoom = this.currentZoom
+    this.camera.updateProjectionMatrix()
+    this.camera.updateMatrixWorld()
 
     this.buildGround()
-    this.buildForest(world)
-    this.buildPlayer()
-
-    const ringGeometry = new THREE.RingGeometry(0.8, 1.05, 32)
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xe1eee7,
-      transparent: true,
-      opacity: 0,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    })
-    this.attackRing = new THREE.Mesh(ringGeometry, ringMaterial)
-    this.attackRing.rotation.x = -Math.PI / 2
-    this.attackRing.position.y = 0.06
-    this.scene.add(this.attackRing)
+    this.buildLandmarks(world)
+    this.buildGrass(world)
+    this.buildKnight()
 
     this.resizeObserver = new ResizeObserver(this.resize)
     this.resizeObserver.observe(parent)
@@ -93,207 +95,322 @@ export class WorldRenderer {
   }
 
   render(world: WorldState, dt: number): void {
+    if (this.disposed) return
+
+    this.shared.uTime.value = world.elapsed
+    this.shared.uPlayerPos.value.set(world.player.x, 0, world.player.z)
+    const torchTarget = world.torchOn ? 1 : 0
+    this.shared.uTorchPower.value += (torchTarget - this.shared.uTorchPower.value) * Math.min(1, dt * 4.5)
+    this.torchPos.set(
+      world.player.x + Math.sin(world.player.facing) * 0.45,
+      1.45,
+      world.player.z + Math.cos(world.player.facing) * 0.45,
+    )
+
+    this.updateRipples(world, dt)
     this.syncPlayer(world, dt)
     this.syncEnemies(world.enemies)
     this.syncCamera(world, dt)
 
-    this.renderer.setRenderTarget(this.target)
     this.renderer.render(this.scene, this.camera)
-    this.renderer.readRenderTargetPixels(this.target, 0, 0, this.cols, this.rows, this.pixels)
-    this.renderer.setRenderTarget(null)
+  }
 
-    this.drawGlyphFrame(world.elapsed)
+  adjustZoom(delta: number): void {
+    if (delta === 0) return
+    const factor = delta > 0 ? Math.pow(1.16, delta) : Math.pow(0.86, -delta)
+    this.targetZoom = THREE.MathUtils.clamp(this.targetZoom * factor, 0.75, 5.2)
+  }
+
+  toggleMacroZoom(): void {
+    this.targetZoom = this.targetZoom < 2.4 ? 3.6 : 1.15
   }
 
   destroy(): void {
+    if (this.disposed) return
+    this.disposed = true
     this.resizeObserver.disconnect()
-    this.target.dispose()
-    this.renderer.dispose()
     this.scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return
       object.geometry.dispose()
       const materials = Array.isArray(object.material) ? object.material : [object.material]
       for (const material of materials) material.dispose()
     })
+    this.atlas.dispose()
+    this.renderer.dispose()
     this.element.remove()
   }
 
-  private resize = (): void => {
-    const rect = this.element.parentElement?.getBoundingClientRect()
-    if (!rect) return
-
-    this.width = Math.max(1, rect.width)
-    this.height = Math.max(1, rect.height)
-    this.dpr = Math.min(window.devicePixelRatio || 1, 1.6)
-
-    this.element.width = Math.floor(this.width * this.dpr)
-    this.element.height = Math.floor(this.height * this.dpr)
-    this.element.style.width = `${this.width}px`
-    this.element.style.height = `${this.height}px`
-    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
-
-    this.cols = Math.max(72, Math.min(118, Math.round(this.width / 10.5)))
-    this.rows = Math.max(42, Math.min(72, Math.round(this.cols * (this.height / this.width) * 0.59)))
-    this.target.setSize(this.cols, this.rows)
-    this.pixels = new Uint8Array(this.cols * this.rows * 4)
-
-    this.camera.aspect = this.width / this.height
-    this.camera.updateProjectionMatrix()
+  private createAsciiMaterial(base: number, dark: number, charOffset = 0, emissive = 0): ObjectMaterial {
+    const material = new THREE.ShaderMaterial({
+      vertexShader: objectVertexShader,
+      fragmentShader: objectFragmentShader,
+      uniforms: {
+        uAsciiTex: this.shared.uAsciiTex,
+        uCamRight: this.shared.uCamRight,
+        uCamUp: this.shared.uCamUp,
+        uTime: this.shared.uTime,
+        uPlayerPos: this.shared.uPlayerPos,
+        uTorchPos: this.shared.uTorchPos,
+        uTorchPower: this.shared.uTorchPower,
+        uBaseColor: { value: new THREE.Color(base) },
+        uDarkColor: { value: new THREE.Color(dark) },
+        uCharOffset: { value: charOffset },
+        uEmissive: { value: emissive },
+      },
+    }) as ObjectMaterial
+    this.objectMaterials.push(material)
+    return material
   }
 
   private buildGround(): void {
-    const geometry = new THREE.PlaneGeometry(56, 56, 36, 36)
-    const position = geometry.attributes.position
-    if (position) {
-      for (let i = 0; i < position.count; i += 1) {
-        const x = position.getX(i)
-        const y = position.getY(i)
-        const height = Math.sin(x * 0.45) * 0.09 + Math.cos(y * 0.37) * 0.07 + Math.sin((x + y) * 0.21) * 0.05
-        position.setZ(i, height)
-      }
-      position.needsUpdate = true
-      geometry.computeVertexNormals()
-    }
-
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x314a39,
-      emissive: 0x07100a,
-      emissiveIntensity: 0.9,
-      roughness: 1,
-      metalness: 0,
+    const geometry = new THREE.PlaneGeometry(110, 110, 1, 1)
+    geometry.rotateX(-Math.PI / 2)
+    const material = new THREE.ShaderMaterial({
+      vertexShader: groundVertexShader,
+      fragmentShader: groundFragmentShader,
+      uniforms: this.shared,
     })
-    const ground = new THREE.Mesh(geometry, material)
-    ground.rotation.x = -Math.PI / 2
-    ground.position.y = -0.1
-    this.scene.add(ground)
+    this.scene.add(new THREE.Mesh(geometry, material))
+  }
 
-    const path = new THREE.Mesh(
-      new THREE.PlaneGeometry(6.2, 48, 1, 24),
-      new THREE.MeshStandardMaterial({
-        color: 0x526057,
-        emissive: 0x101612,
-        emissiveIntensity: 0.55,
-        roughness: 1,
-      }),
+  private buildLandmarks(world: WorldState): void {
+    const stone = this.createAsciiMaterial(0x7c858e, 0x161a1e, 1.3)
+    const moss = this.createAsciiMaterial(0x68766c, 0x141916, 4.7)
+
+    world.trees.forEach((landmark, index) => {
+      if (landmark.height > 3.5) {
+        const group = new THREE.Group()
+        group.position.set(landmark.x, 0, landmark.z)
+
+        const base = new THREE.Mesh(
+          new THREE.BoxGeometry(landmark.radius * 2.1, 0.8, landmark.radius * 1.6),
+          stone,
+        )
+        base.position.y = 0.4
+        group.add(base)
+
+        const pillar = new THREE.Mesh(
+          new THREE.BoxGeometry(landmark.radius * 1.45, landmark.height, landmark.radius * 1.15),
+          stone,
+        )
+        pillar.position.y = landmark.height * 0.5
+        group.add(pillar)
+        this.scene.add(group)
+        return
+      }
+
+      const geometry = new THREE.DodecahedronGeometry(1, 1)
+      geometry.scale(landmark.radius, landmark.height, landmark.radius * (0.72 + (index % 3) * 0.1))
+      const mesh = new THREE.Mesh(geometry, index % 2 === 0 ? stone : moss)
+      mesh.position.set(landmark.x, landmark.height * 0.34, landmark.z)
+      mesh.rotation.set(0.08 * (index % 2), index * 1.1, 0.04 * (index % 3))
+      this.scene.add(mesh)
+    })
+  }
+
+  private buildGrass(world: WorldState): void {
+    const coarse = window.matchMedia('(pointer: coarse)').matches
+    const bladeCount = coarse ? 24000 : 48000
+    const spread = 54
+    const base = new THREE.BufferGeometry()
+    base.setAttribute(
+      'position',
+      new THREE.BufferAttribute(
+        new Float32Array([
+          -0.042, 0, 0,
+          0.042, 0, 0,
+          0, 1, 0,
+        ]),
+        3,
+      ),
     )
-    path.rotation.x = -Math.PI / 2
-    path.rotation.z = -0.22
-    path.position.set(-2.2, -0.065, 0)
-    this.scene.add(path)
 
-    const grassMaterial = new THREE.MeshBasicMaterial({ color: 0x446b4c })
-    const bladeGeometry = new THREE.ConeGeometry(0.045, 0.38, 3)
-    let seed = 0x71a55
+    const geometry = new THREE.InstancedBufferGeometry()
+    geometry.setAttribute('position', base.getAttribute('position'))
+
+    const offsets = new Float32Array(bladeCount * 3)
+    const scaleRot = new Float32Array(bladeCount * 3)
+    let valid = 0
+    let attempts = 0
+    let seed = 0x41534349
     const random = (): number => {
       seed = (seed * 1664525 + 1013904223) >>> 0
       return seed / 0x100000000
     }
-    for (let i = 0; i < 190; i += 1) {
-      const blade = new THREE.Mesh(bladeGeometry, grassMaterial)
-      blade.position.set((random() * 2 - 1) * 25, 0.1, (random() * 2 - 1) * 25)
-      blade.rotation.y = random() * Math.PI
-      blade.scale.y = 0.55 + random() * 1.4
-      this.scene.add(blade)
+
+    while (valid < bladeCount && attempts < bladeCount * 3) {
+      attempts += 1
+      const x = (random() - 0.5) * spread
+      const z = (random() - 0.5) * spread
+      const riverDist = Math.abs(riverSignedDistance(x, z))
+      if (riverDist < 6.95) continue
+
+      let blocked = false
+      for (const obstacle of world.trees) {
+        const dx = x - obstacle.x
+        const dz = z - obstacle.z
+        const radius = obstacle.radius * 1.05
+        if (dx * dx + dz * dz < radius * radius) {
+          blocked = true
+          break
+        }
+      }
+      if (blocked) continue
+
+      offsets[valid * 3] = x
+      offsets[valid * 3 + 1] = 0
+      offsets[valid * 3 + 2] = z
+
+      const bank = Math.min(1, (riverDist - 6.8) * 0.5)
+      const height = (0.38 + random() * 0.42) * (0.45 + 0.55 * bank)
+      const flowerRoll = random()
+      scaleRot[valid * 3] = height
+      scaleRot[valid * 3 + 1] = random()
+      scaleRot[valid * 3 + 2] = flowerRoll > 0.962 ? (flowerRoll > 0.992 ? 2 : 1) : 0
+      valid += 1
     }
+
+    geometry.setAttribute('aOffset', new THREE.InstancedBufferAttribute(offsets.subarray(0, valid * 3), 3))
+    geometry.setAttribute('aScaleRot', new THREE.InstancedBufferAttribute(scaleRot.subarray(0, valid * 3), 3))
+    geometry.instanceCount = valid
+
+    const material = new THREE.ShaderMaterial({
+      vertexShader: grassVertexShader,
+      fragmentShader: grassFragmentShader,
+      uniforms: {
+        uTime: this.shared.uTime,
+        uPlayerPos: this.shared.uPlayerPos,
+        uTorchPos: this.shared.uTorchPos,
+        uTorchPower: this.shared.uTorchPower,
+        uSwingTime: this.shared.uSwingTime,
+      },
+      side: THREE.DoubleSide,
+    })
+
+    const mesh = new THREE.Mesh(geometry, material)
+    mesh.frustumCulled = false
+    this.scene.add(mesh)
+    base.dispose()
   }
 
-  private buildForest(world: WorldState): void {
-    const trunkMaterial = new THREE.MeshStandardMaterial({
-      color: 0x604632,
-      emissive: 0x120b06,
-      emissiveIntensity: 0.5,
-      roughness: 1,
-    })
-    const crownMaterial = new THREE.MeshStandardMaterial({
-      color: 0x2c6544,
-      emissive: 0x06150c,
-      emissiveIntensity: 0.72,
-      roughness: 0.96,
-    })
+  private buildKnight(): void {
+    const hair = this.createAsciiMaterial(0xf2f5f8, 0x5c6670, 2.1, 0.22)
+    const armor = this.createAsciiMaterial(0x9aa4b0, 0x22262c, 5.4, 0.05)
+    const cloak = this.createAsciiMaterial(0xd92626, 0x3b0709, 8.2, 0.08)
+    const boot = this.createAsciiMaterial(0x453832, 0x120e0c, 3)
+    const sword = this.createAsciiMaterial(0xffffff, 0x778899, 11, 0.35)
+    const slash = this.createAsciiMaterial(0xffe57f, 0xb26a00, 15, 0.8)
 
-    for (const tree of world.trees) {
-      const trunk = new THREE.Mesh(
-        new THREE.CylinderGeometry(tree.radius * 0.32, tree.radius * 0.48, tree.height * 0.62, 5),
-        trunkMaterial,
-      )
-      trunk.position.set(tree.x, tree.height * 0.31, tree.z)
-      trunk.rotation.y = (tree.x * 0.71 + tree.z * 0.37) % Math.PI
-      this.scene.add(trunk)
+    const legGeometry = new THREE.BoxGeometry(0.24, 0.72, 0.24)
+    this.leftLeg = new THREE.Mesh(legGeometry, boot)
+    this.leftLeg.position.set(-0.16, 0.38, 0)
+    this.rightLeg = new THREE.Mesh(legGeometry, boot)
+    this.rightLeg.position.set(0.16, 0.38, 0)
+    this.playerGroup.add(this.leftLeg, this.rightLeg)
 
-      const crown = new THREE.Mesh(
-        new THREE.ConeGeometry(tree.radius * 2.15, tree.height * 0.72, 7),
-        crownMaterial,
-      )
-      crown.position.set(tree.x, tree.height * 0.72, tree.z)
-      crown.rotation.y = (tree.x * 0.13 - tree.z * 0.29) % Math.PI
-      this.scene.add(crown)
-    }
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.64, 0.82, 0.42), armor)
+    torso.position.y = 1.12
+    this.playerGroup.add(torso)
 
-    const stoneMaterial = new THREE.MeshStandardMaterial({
-      color: 0x68716d,
-      emissive: 0x090b0a,
-      emissiveIntensity: 0.55,
-      roughness: 0.93,
-    })
-    for (let i = 0; i < 28; i += 1) {
-      const angle = i * 2.399
-      const radius = 5 + (i % 8) * 2.15
-      const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18 + (i % 3) * 0.1, 0), stoneMaterial)
-      stone.position.set(Math.cos(angle) * radius, 0.08, Math.sin(angle) * radius)
-      stone.scale.y = 0.55 + (i % 4) * 0.13
-      this.scene.add(stone)
-    }
-  }
+    const shoulderGeometry = new THREE.SphereGeometry(0.26, 8, 8)
+    const shoulderLeft = new THREE.Mesh(shoulderGeometry, armor)
+    shoulderLeft.position.set(-0.36, 1.42, 0)
+    const shoulderRight = new THREE.Mesh(shoulderGeometry, armor)
+    shoulderRight.position.set(0.36, 1.42, 0)
+    this.playerGroup.add(shoulderLeft, shoulderRight)
 
-  private buildPlayer(): void {
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0xe2ebe6,
-      emissive: 0x26352e,
-      emissiveIntensity: 0.55,
-      roughness: 0.68,
-      metalness: 0.08,
-    })
-    const darkMaterial = new THREE.MeshStandardMaterial({
-      color: 0x607168,
-      emissive: 0x101813,
-      emissiveIntensity: 0.5,
-      roughness: 0.9,
-    })
+    this.capeMesh = new THREE.Mesh(new THREE.BoxGeometry(0.76, 1.38, 0.18), cloak)
+    this.capeMesh.position.set(0, 0.82, -0.24)
+    this.capeMesh.rotation.x = 0.18
+    this.playerGroup.add(this.capeMesh)
 
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.4, 1.05, 6), bodyMaterial)
-    body.position.y = 0.68
-    this.playerGroup.add(body)
-
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 7, 6), darkMaterial)
-    head.position.y = 1.43
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.29, 10, 10), hair)
+    head.position.set(0, 1.76, 0.02)
     this.playerGroup.add(head)
 
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1.08), bodyMaterial)
-    blade.position.set(0.47, 0.82, 0.2)
-    blade.rotation.y = -0.34
-    this.playerGroup.add(blade)
+    this.rightArm = new THREE.Group()
+    this.rightArm.position.set(0.42, 1.36, 0.05)
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 1.45), sword)
+    blade.position.z = 0.72
+    this.rightArm.add(blade)
+    this.playerGroup.add(this.rightArm)
+
+    const slashGeometry = new THREE.RingGeometry(0.85, 1.65, 18, 1, -Math.PI * 0.45, Math.PI * 0.9)
+    slashGeometry.rotateX(-Math.PI / 2)
+    this.slashMesh = new THREE.Mesh(slashGeometry, slash)
+    this.slashMesh.position.y = 1.05
+    this.slashMesh.visible = false
+    this.playerGroup.add(this.slashMesh)
 
     this.scene.add(this.playerGroup)
   }
 
+  private syncPlayer(world: WorldState, dt: number): void {
+    const dx = world.player.x - this.lastX
+    const dz = world.player.z - this.lastZ
+    const moved = Math.hypot(dx, dz)
+    const moving = moved > 0.0003
+    if (moving) this.walkCycle += dt * (isInsideRiver(world.player.x, world.player.z) ? 9.5 : 12)
+
+    const sink = isInsideRiver(world.player.x, world.player.z)
+      ? -0.28 * Math.min(1, (6.8 - Math.abs(riverSignedDistance(world.player.x, world.player.z))) * 0.6)
+      : 0
+
+    this.playerGroup.position.set(world.player.x, sink, world.player.z)
+    this.playerGroup.rotation.y = world.player.facing
+
+    const legSwing = moving ? Math.sin(this.walkCycle) * 0.55 : 0
+    if (this.leftLeg) this.leftLeg.rotation.x = legSwing
+    if (this.rightLeg) this.rightLeg.rotation.x = -legSwing
+
+    if (this.capeMesh) {
+      this.capeMesh.rotation.x = 0.2 + (moving ? 0.28 : 0.04) + Math.sin(world.elapsed * 4.5) * 0.07
+      this.capeMesh.rotation.z = Math.cos(world.elapsed * 3.2) * 0.05
+    }
+
+    const attacking = world.player.attackPulse > 0
+    if (attacking) {
+      const phase = 1 - world.player.attackPulse / 0.34
+      if (this.rightArm) {
+        this.rightArm.rotation.y = -1.2 + phase * 2.5
+        this.rightArm.rotation.x = 0.35
+      }
+      if (this.slashMesh) {
+        this.slashMesh.visible = true
+        this.slashMesh.rotation.y = phase * 1.4
+      }
+      this.shared.uSwingTime.value = Math.sin(phase * Math.PI)
+    } else {
+      if (this.rightArm) {
+        this.rightArm.rotation.y = Math.sin(world.elapsed * 2) * 0.08
+        this.rightArm.rotation.x = 0.15 + (moving ? Math.cos(this.walkCycle) * 0.25 : 0)
+      }
+      if (this.slashMesh) this.slashMesh.visible = false
+      this.shared.uSwingTime.value = 0
+    }
+
+    this.lastX = world.player.x
+    this.lastZ = world.player.z
+  }
+
   private createEnemy(enemy: EnemyState): THREE.Group {
     const group = new THREE.Group()
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xb03e48,
-      emissive: 0x5a1018,
-      emissiveIntensity: 1.6,
-      roughness: 0.72,
-    })
-    const body = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.45, 5), material)
-    body.position.y = 0.72
+    const bodyMaterial = this.createAsciiMaterial(0x9b343d, 0x24070b, 19 + enemy.id, 0.08)
+    const eyeMaterial = this.createAsciiMaterial(0xffb09c, 0x5a1513, 27 + enemy.id, 0.45)
+
+    const body = new THREE.Mesh(new THREE.ConeGeometry(0.46, 1.5, 6), bodyMaterial)
+    body.position.y = 0.75
     group.add(body)
 
-    const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xffaaa3 })
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 5, 4), eyeMaterial)
-    eye.position.set(0, 1.12, 0.29)
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 7, 6), bodyMaterial)
+    head.position.y = 1.48
+    group.add(head)
+
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 5, 4), eyeMaterial)
+    eye.position.set(0, 1.5, 0.2)
     group.add(eye)
 
-    group.userData.bodyMaterial = material
+    group.userData.bodyMaterial = bodyMaterial
     group.position.set(enemy.x, 0, enemy.z)
     this.scene.add(group)
     this.enemyMeshes.set(enemy.id, group)
@@ -305,114 +422,81 @@ export class WorldRenderer {
     for (const enemy of enemies) {
       alive.add(enemy.id)
       const group = this.enemyMeshes.get(enemy.id) ?? this.createEnemy(enemy)
-      group.position.set(enemy.x, 0, enemy.z)
-      const material = group.userData.bodyMaterial as THREE.MeshStandardMaterial | undefined
-      if (material) {
-        material.emissiveIntensity = enemy.hitFlash > 0 ? 5.5 : 1.6
-        material.color.setHex(enemy.hitFlash > 0 ? 0xff9b9b : 0xb03e48)
-      }
+      group.position.set(enemy.x, isInsideRiver(enemy.x, enemy.z) ? -0.2 : 0, enemy.z)
+      const dx = this.shared.uPlayerPos.value.x - enemy.x
+      const dz = this.shared.uPlayerPos.value.z - enemy.z
+      group.rotation.y = Math.atan2(dx, dz)
+      const material = group.userData.bodyMaterial as ObjectMaterial | undefined
+      if (material) material.uniforms.uEmissive.value = enemy.hitFlash > 0 ? 0.75 : 0.08
     }
 
     for (const [id, group] of this.enemyMeshes) {
       if (alive.has(id)) continue
       this.scene.remove(group)
-      group.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return
-        object.geometry.dispose()
-        const materials = Array.isArray(object.material) ? object.material : [object.material]
-        for (const material of materials) material.dispose()
-      })
       this.enemyMeshes.delete(id)
     }
   }
 
-  private syncPlayer(world: WorldState, dt: number): void {
-    this.playerGroup.position.set(world.player.x, 0, world.player.z)
-    this.playerGroup.rotation.y = world.player.facing
-    this.playerLight.position.set(world.player.x, 1.8, world.player.z)
-    this.playerLight.intensity = world.player.hurtPulse > 0 ? 12 : 8.5
-
-    this.attackRing.position.set(world.player.x, 0.04, world.player.z)
-    const ringMaterial = this.attackRing.material as THREE.MeshBasicMaterial
-    if (world.player.attackPulse > 0) {
-      const phase = 1 - world.player.attackPulse / 0.34
-      const scale = 0.75 + phase * 1.9
-      this.attackRing.scale.setScalar(scale)
-      ringMaterial.opacity = Math.max(0, (1 - phase) * 0.8)
-    } else {
-      ringMaterial.opacity = THREE.MathUtils.lerp(ringMaterial.opacity, 0, Math.min(1, dt * 16))
-    }
-  }
-
-  private syncCamera(world: WorldState, dt: number): void {
-    const desired = new THREE.Vector3(world.player.x + 7.1, 8.3, world.player.z + 8.9)
-    const smoothing = 1 - Math.exp(-dt * 5.2)
-    this.camera.position.lerp(desired, smoothing)
-    this.camera.lookAt(world.player.x, 0.68, world.player.z)
-  }
-
-  private drawGlyphFrame(seconds: number): void {
-    const cellW = this.width / this.cols
-    const cellH = this.height / this.rows
-    const fontSize = Math.max(9, Math.ceil(cellH * 1.18))
-
-    this.ctx.fillStyle = '#000'
-    this.ctx.fillRect(0, 0, this.width, this.height)
-    this.ctx.textAlign = 'center'
-    this.ctx.textBaseline = 'middle'
-    this.ctx.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
-
-    for (let gy = 0; gy < this.rows; gy += 1) {
-      const sourceY = this.rows - 1 - gy
-      for (let gx = 0; gx < this.cols; gx += 1) {
-        const index = (sourceY * this.cols + gx) * 4
-        const rawR = this.pixels[index] ?? 0
-        const rawG = this.pixels[index + 1] ?? 0
-        const rawB = this.pixels[index + 2] ?? 0
-
-        const r = toDisplayChannel(rawR)
-        const g = toDisplayChannel(rawG)
-        const b = toDisplayChannel(rawB)
-        const luminance = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255
-        const maxChannel = Math.max(r, g, b) / 255
-
-        if (luminance < 0.018 && maxChannel < 0.035) continue
-
-        const liftedLuminance = clamp01((luminance - 0.012) * 1.55)
-        const rampPosition = Math.min(
-          GLYPH_RAMP.length - 1,
-          Math.max(0, Math.floor(Math.pow(liftedLuminance, 0.78) * GLYPH_RAMP.length)),
-        )
-
-        let glyph = GLYPH_RAMP[rampPosition] ?? '.'
-        if (rampPosition >= 3 && rampPosition <= 6) {
-          const selector = (gx * 17 + gy * 31 + Math.floor(seconds * 0.35)) % 4
-          glyph = selector === 0 ? '/' : selector === 1 ? '\\' : selector === 2 ? '|' : ':'
-        }
-
-        const floor = 20 + liftedLuminance * 12
-        const rr = Math.min(255, Math.round(r * 1.12 + floor))
-        const gg = Math.min(255, Math.round(g * 1.16 + floor))
-        const bb = Math.min(255, Math.round(b * 1.12 + floor))
-        this.ctx.globalAlpha = 0.56 + liftedLuminance * 0.44
-        this.ctx.fillStyle = `rgb(${rr}, ${gg}, ${bb})`
-        this.ctx.fillText(glyph, (gx + 0.5) * cellW, (gy + 0.5) * cellH)
+  private updateRipples(world: WorldState, dt: number): void {
+    const moved = Math.hypot(world.player.x - this.lastX, world.player.z - this.lastZ)
+    if (isInsideRiver(world.player.x, world.player.z) && moved > 0.002) {
+      this.stepDistance += moved
+      if (this.stepDistance > 0.8) {
+        this.stepDistance = 0
+        this.spawnRipple(world.player.x, world.player.z, 0.9, 0.22)
       }
     }
 
-    this.ctx.globalAlpha = 1
-    const vignette = this.ctx.createRadialGradient(
-      this.width * 0.5,
-      this.height * 0.5,
-      Math.min(this.width, this.height) * 0.3,
-      this.width * 0.5,
-      this.height * 0.5,
-      Math.max(this.width, this.height) * 0.78,
-    )
-    vignette.addColorStop(0, 'rgba(0,0,0,0)')
-    vignette.addColorStop(0.78, 'rgba(0,0,0,.025)')
-    vignette.addColorStop(1, 'rgba(0,0,0,.26)')
-    this.ctx.fillStyle = vignette
-    this.ctx.fillRect(0, 0, this.width, this.height)
+    if (world.player.attackPulse > this.lastAttackPulse + 0.08) {
+      const x = world.player.x + Math.sin(world.player.facing) * 1.1
+      const z = world.player.z + Math.cos(world.player.facing) * 1.1
+      if (isInsideRiver(x, z) || isInsideRiver(world.player.x, world.player.z)) this.spawnRipple(x, z, 1.35, 0.4)
+    }
+    this.lastAttackPulse = world.player.attackPulse
+
+    for (const ripple of this.ripples) {
+      if (ripple.w <= 0.005) continue
+      ripple.x += -0.86 * dt * 1.65
+      ripple.y += 0.5 * dt * 1.65
+      ripple.z += dt * 2.35
+      ripple.w = Math.max(0, ripple.w - dt * 0.52)
+    }
+  }
+
+  private spawnRipple(x: number, z: number, strength: number, radius: number): void {
+    this.ripples[this.rippleCursor]?.set(x, z, radius, strength)
+    this.rippleCursor = (this.rippleCursor + 1) % MAX_RIPPLES
+  }
+
+  private syncCamera(world: WorldState, dt: number): void {
+    this.currentZoom += (this.targetZoom - this.currentZoom) * Math.min(1, dt * 7.5)
+    this.camera.zoom = this.currentZoom
+
+    const targetX = world.player.x
+    const targetZ = world.player.z + 22
+    this.camera.position.x += (targetX - this.camera.position.x) * Math.min(1, dt * 6)
+    this.camera.position.z += (targetZ - this.camera.position.z) * Math.min(1, dt * 6)
+    this.camera.lookAt(world.player.x, 0, world.player.z)
+    this.camera.updateProjectionMatrix()
+    this.camera.updateMatrixWorld()
+
+    this.camRight.setFromMatrixColumn(this.camera.matrixWorld, 0).normalize()
+    this.camUp.setFromMatrixColumn(this.camera.matrixWorld, 1).normalize()
+  }
+
+  private resize = (): void => {
+    const parent = this.element.parentElement
+    if (!parent) return
+    const rect = parent.getBoundingClientRect()
+    const width = Math.max(1, rect.width)
+    const height = Math.max(1, rect.height)
+    const aspect = width / height
+
+    this.camera.left = -BASE_FRUSTUM * aspect * 0.5
+    this.camera.right = BASE_FRUSTUM * aspect * 0.5
+    this.camera.top = BASE_FRUSTUM * 0.5
+    this.camera.bottom = -BASE_FRUSTUM * 0.5
+    this.camera.updateProjectionMatrix()
+    this.renderer.setSize(width, height, false)
   }
 }
