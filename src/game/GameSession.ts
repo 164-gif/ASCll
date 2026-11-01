@@ -1,6 +1,7 @@
 import '../gameplay.css'
 import '../ui/map/ReadableWorldMap.css'
 import '../ui/camp/CampInteraction.css'
+import type { AudioDirector } from '../audio/AudioDirector'
 import { InputController } from '../input/InputController'
 import { WorldRenderer } from '../render/world/WorldRenderer'
 import { ForestCampEnhancer } from '../render/world/ForestCampEnhancer'
@@ -21,6 +22,7 @@ export class GameSession {
   private readonly hud: GameHud
   private readonly interaction: CampInteraction
   private readonly map: WorldMap
+  private readonly audio: AudioDirector
   private readonly onExit: () => void
 
   private frame = 0
@@ -75,7 +77,8 @@ export class GameSession {
     this.accumulator = 0
   }
 
-  constructor(parent: HTMLElement, onExit: () => void) {
+  constructor(parent: HTMLElement, audio: AudioDirector, onExit: () => void) {
+    this.audio = audio
     this.onExit = onExit
     this.element = document.createElement('section')
     this.element.className = 'gameplay-root gameplay-root--entering'
@@ -103,6 +106,7 @@ export class GameSession {
   start(): void {
     if (this.active) return
     this.active = true
+    this.audio.enterWorld(this.world)
     this.lastTime = performance.now()
     requestAnimationFrame(() => this.element.classList.remove('gameplay-root--entering'))
     this.frame = requestAnimationFrame(this.tick)
@@ -155,6 +159,7 @@ export class GameSession {
       this.accumulator = 0
     }
 
+    this.audio.updateWorld(this.world, frameDt)
     this.renderer.render(this.world, frameDt)
     this.hud.update(this.world)
     this.interaction.update(this.world)
