@@ -19,7 +19,7 @@ export class GameHud {
         <div class="game-hud__meter game-hud__meter--stamina"><span>st</span><i data-stamina></i></div>
         <span class="game-hud__name" data-torch></span>
       </div>
-      <div class="game-hud__objective" data-objective>river test</div>
+      <div class="game-hud__objective" data-objective>речная низина</div>
       <div class="game-hud__hint">WASD двигаться · SHIFT бег · SPACE / ЛКМ удар · F свет · Z макро ASCII · колесо масштаб · ESC меню</div>
       <div class="game-hud__event" data-status></div>
     `
@@ -44,9 +44,10 @@ export class GameHud {
     this.stamina.style.transform = `scaleX(${Math.max(0, world.player.stamina) / 100})`
     this.torch.textContent = world.torchOn ? 'f · light on' : 'f · light off'
 
-    if (isInsideRiver(world.player.x, world.player.z)) this.objective.textContent = 'river test · current'
-    else if (world.kills > 0) this.objective.textContent = `river test · ${world.kills} fallen`
-    else this.objective.textContent = 'river test'
+    const zone = world.currentZone
+    if (isInsideRiver(world.player.x, world.player.z)) this.objective.textContent = `${zone.name} · течение`
+    else if (world.kills > 0) this.objective.textContent = `${zone.name} · ${world.kills} fallen`
+    else this.objective.textContent = zone.name
 
     if (world.player.hp <= 0) this.status.textContent = 'ты упал'
     else if (world.player.hurtPulse > 0) this.status.textContent = 'удар'
