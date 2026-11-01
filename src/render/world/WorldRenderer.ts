@@ -254,36 +254,53 @@ export class WorldRenderer {
     group.position.set(landmark.x, baseY, landmark.z)
     group.rotation.y = landmark.rotation ?? index * 0.71
 
-    const trunkHeight = landmark.height * 0.58
+    const trunkHeight = landmark.height * 0.78
     const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(landmark.radius * 0.18, landmark.radius * 0.31, trunkHeight, 6),
+      new THREE.CylinderGeometry(landmark.radius * 0.2, landmark.radius * 0.32, trunkHeight, 8),
       bark,
     )
     trunk.position.y = trunkHeight * 0.5
     group.add(trunk)
 
-    const crown1 = new THREE.Mesh(
-      new THREE.ConeGeometry(landmark.radius * 2.25, landmark.height * 0.45, 7),
-      pine,
-    )
-    crown1.position.y = landmark.height * 0.55
-    crown1.rotation.y = index * 0.43
-    group.add(crown1)
+    const crown = [
+      { y: 0.4, radius: 2.25, height: 0.32 },
+      { y: 0.55, radius: 2.0, height: 0.3 },
+      { y: 0.69, radius: 1.65, height: 0.27 },
+      { y: 0.81, radius: 1.28, height: 0.23 },
+      { y: 0.91, radius: 0.82, height: 0.18 },
+    ] as const
 
-    const crown2 = new THREE.Mesh(
-      new THREE.ConeGeometry(landmark.radius * 1.72, landmark.height * 0.39, 7),
-      pine,
-    )
-    crown2.position.y = landmark.height * 0.73
-    crown2.rotation.y = index * 0.67
-    group.add(crown2)
+    crown.forEach((tier, tierIndex) => {
+      const mesh = new THREE.Mesh(
+        new THREE.ConeGeometry(
+          landmark.radius * tier.radius * (0.94 + ((index + tierIndex) % 3) * 0.035),
+          landmark.height * tier.height,
+          8,
+        ),
+        pine,
+      )
+      mesh.position.y = landmark.height * tier.y
+      mesh.rotation.y = index * 0.37 + tierIndex * 0.69
+      group.add(mesh)
+    })
 
-    const crown3 = new THREE.Mesh(
-      new THREE.ConeGeometry(landmark.radius * 1.12, landmark.height * 0.31, 7),
-      pine,
+    const branchGeometry = new THREE.CylinderGeometry(
+      landmark.radius * 0.055,
+      landmark.radius * 0.075,
+      landmark.radius * 1.55,
+      5,
     )
-    crown3.position.y = landmark.height * 0.88
-    group.add(crown3)
+    const branchA = new THREE.Mesh(branchGeometry, bark)
+    branchA.position.set(landmark.radius * 0.52, landmark.height * 0.34, 0)
+    branchA.rotation.z = Math.PI * 0.43
+    branchA.rotation.y = index * 0.37
+    group.add(branchA)
+
+    const branchB = new THREE.Mesh(branchGeometry.clone(), bark)
+    branchB.position.set(-landmark.radius * 0.44, landmark.height * 0.41, landmark.radius * 0.1)
+    branchB.rotation.z = -Math.PI * 0.4
+    branchB.rotation.y = index * 0.53 + 0.8
+    group.add(branchB)
 
     this.scene.add(group)
   }
@@ -316,18 +333,36 @@ export class WorldRenderer {
     fallen.rotation.y = 0.6
     group.add(fallen)
 
+    const pillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.34, landmark.height * 0.58, 0.34),
+      material,
+    )
+    pillar.position.set(-landmark.radius * 0.72, landmark.height * 0.29, -landmark.radius * 0.32)
+    pillar.rotation.z = ((index % 2) * 2 - 1) * 0.06
+    group.add(pillar)
+
     this.scene.add(group)
   }
 
   private buildGrass(world: WorldState): void {
     const coarse = window.matchMedia('(pointer: coarse)').matches
-    const bladeCount = coarse ? 52000 : 118000
-    const spread = 178
+    const bladeCount = coarse ? 70000 : 142000
+    const spread = 182
 
     const base = new THREE.BufferGeometry()
     base.setAttribute(
       'position',
-      new THREE.BufferAttribute(new Float32Array([-0.05, 0, 0, 0.05, 0, 0, 0, 1, 0]), 3),
+      new THREE.BufferAttribute(
+        new Float32Array([
+          -0.045, 0, 0,
+          0.045, 0, 0,
+          0, 1, 0,
+          0, 0, -0.045,
+          0, 0, 0.045,
+          0, 1, 0,
+        ]),
+        3,
+      ),
     )
 
     const geometry = new THREE.InstancedBufferGeometry()
@@ -343,18 +378,28 @@ export class WorldRenderer {
       return seed / 0x100000000
     }
 
-    while (valid < bladeCount && attempts < bladeCount * 4) {
+    while (valid < bladeCount && attempts < bladeCount * 7) {
       attempts += 1
       const x = (random() - 0.5) * spread
       const z = (random() - 0.5) * spread
       const riverDist = Math.abs(riverSignedDistance(x, z))
-      if (riverDist < RIVER_HALF_WIDTH + 0.15) continue
+      if (riverDist < RIVER_HALF_WIDTH + 0.08) continue
+
+      const zone = zoneAt(x, z)
+      const density =
+        zone.id === 'meadow' ? 1 :
+        zone.id === 'forest' ? 0.96 :
+        zone.id === 'ruins' ? 0.9 :
+        zone.id === 'river' ? 0.88 :
+        zone.id === 'wilds' ? 0.82 :
+        0.72
+      if (random() > density) continue
 
       let blocked = false
       for (const obstacle of world.trees) {
         const dx = x - obstacle.x
         const dz = z - obstacle.z
-        const radius = obstacle.radius * (obstacle.kind === 'tree' ? 0.72 : 1.08)
+        const radius = obstacle.radius * (obstacle.kind === 'tree' ? 0.54 : 0.84)
         if (dx * dx + dz * dz < radius * radius) {
           blocked = true
           break
@@ -362,28 +407,27 @@ export class WorldRenderer {
       }
       if (blocked) continue
 
-      const zone = zoneAt(x, z)
       offsets[valid * 3] = x
       offsets[valid * 3 + 1] = terrainHeightAt(x, z)
       offsets[valid * 3 + 2] = z
 
-      const bank = Math.min(1, Math.max(0, (riverDist - RIVER_HALF_WIDTH) * 0.45))
-      let height = 0.34 + random() * 0.46
-      let flowerChance = 0.028
+      const bank = Math.min(1, Math.max(0, (riverDist - RIVER_HALF_WIDTH) * 0.42))
+      let height = 0.38 + random() * 0.5
+      let flowerChance = 0.035
       if (zone.id === 'meadow') {
-        height *= 1.18
-        flowerChance = 0.09
+        height *= 1.3
+        flowerChance = 0.11
       } else if (zone.id === 'forest') {
-        height *= 0.82
-        flowerChance = 0.012
+        height *= 0.96
+        flowerChance = 0.018
       } else if (zone.id === 'highland') {
-        height *= 0.66
+        height *= 0.72
         flowerChance = 0.018
       } else if (zone.id === 'ruins') {
-        height *= 0.76
-        flowerChance = 0.022
+        height *= 0.9
+        flowerChance = 0.03
       }
-      height *= 0.52 + 0.48 * bank
+      height *= 0.78 + 0.22 * bank
 
       const flowerRoll = random()
       scaleRot[valid * 3] = height
