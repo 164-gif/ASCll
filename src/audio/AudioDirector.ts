@@ -158,15 +158,15 @@ export class AudioDirector {
     this.lastPlayerZ = world.player.z
 
     const onBridge = bridgeDeckHeightAt(world.player.x, world.player.z) !== null
-    const inWater = isInsideRiver(world.player.x, world.player.z) && !onBridge
+    const inWater = !world.interior && isInsideRiver(world.player.x, world.player.z) && !onBridge
     const zone = world.currentZone.id
     const riverDistance = Math.abs(riverSignedDistance(world.player.x, world.player.z))
     const nearRiver = clamp01(1 - riverDistance / 30)
 
-    this.setTarget(this.riverGain, inWater ? 0.34 : 0.035 + nearRiver * 0.23, 0.35)
+    this.setTarget(this.riverGain, world.interior ? 0 : inWater ? 0.34 : 0.035 + nearRiver * 0.23, 0.35)
     const windBase = zone === 'highland' ? 0.2 : zone === 'forest' ? 0.07 : zone === 'meadow' ? 0.1 : 0.13
     const windBreath = 0.78 + Math.sin(world.elapsed * 0.19) * 0.16 + Math.sin(world.elapsed * 0.071) * 0.08
-    this.setTarget(this.windGain, windBase * windBreath, 0.7)
+    this.setTarget(this.windGain, world.interior ? 0.012 : windBase * windBreath, 0.7)
 
     this.setTarget(this.fireGain, world.torchOn ? 0.035 : 0, 0.16)
 
@@ -174,15 +174,15 @@ export class AudioDirector {
     for (const enemy of world.enemies) {
       nearestEnemy = Math.min(nearestEnemy, Math.hypot(enemy.x - world.player.x, enemy.z - world.player.z))
     }
-    const danger = nearestEnemy < 9 ? clamp01((9 - nearestEnemy) / 8) * 0.045 : 0
+    const danger = !world.interior && nearestEnemy < 9 ? clamp01((9 - nearestEnemy) / 8) * 0.045 : 0
     this.setTarget(this.dangerGain, danger, 0.45)
 
-    if (moved > 0.001) {
+    if (moved > 0.001 && moved < 2) {
       this.footstepDistance += moved
       const stride = speed > 5.4 ? 1.18 : 1.48
       if (this.footstepDistance >= stride) {
         this.footstepDistance %= stride
-        const surface: Surface = inWater ? 'water' : onBridge || zone === 'ruins' || zone === 'highland' ? 'stone' : 'grass'
+        const surface: Surface = inWater ? 'water' : world.interior || onBridge || zone === 'ruins' || zone === 'highland' ? 'stone' : 'grass'
         this.playFootstep(surface, speed > 5.4)
       }
     }

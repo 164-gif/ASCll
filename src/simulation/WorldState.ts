@@ -1,6 +1,9 @@
 import type { MovementInput } from '../input/InputController'
 import {
   WORLD_LIMIT,
+  TOWN_BUILDINGS,
+  townBuildingDoor,
+  type TownBuilding,
   bridgeDeckHeightAt,
   createWorldLandmarks,
   isInsideRiver,
@@ -40,6 +43,11 @@ export type PlayerState = {
   hurtPulse: number
 }
 
+import { environmentAt } from './EnvironmentState'
+import { INTERIOR_DEPTH, INTERIOR_WIDTH, INTERIOR_EXIT, INTERIOR_FURNITURE, RESIDENTS, pointInRect, settlementBlocked, type Resident } from '../world/Settlement'
+
+export type ResidentState = Resident & { x: number; z: number; facing: number; waypoint: number; pause: number; walking: boolean }
+
 const PLAYER_RADIUS = 0.42
 const TREE_CLEARANCE = 0.08
 
@@ -56,6 +64,9 @@ export class WorldState {
 
   readonly trees: WorldLandmark[] = []
   readonly enemies: EnemyState[] = []
+  readonly residents: ResidentState[] = RESIDENTS.map((resident) => ({ ...resident, x: resident.route[0]![0], z: resident.route[0]![1], facing: 0, waypoint: 1, pause: 1, walking: false }))
+  interior: TownBuilding | null = null
+  private exterior = { x: -0.5, z: 2.2, facing: 0 }
   elapsed = 0
   kills = 0
   torchOn = true
@@ -68,7 +79,30 @@ export class WorldState {
   }
 
   get currentZone(): WorldZone {
-    return zoneAt(this.player.x, this.player.z)
+    return this.interior ? { id: 'town', name: this.interior.name, x: 0, z: 0, radius: 10 } : zoneAt(this.player.x, this.player.z)
+  }
+
+  get environment() { return environmentAt(this.elapsed) }
+  get mapPosition() { return this.interior ? this.exterior : this.player }
+  get canExitInterior(): boolean { return !!this.interior && Math.hypot(this.player.x - INTERIOR_EXIT.x, this.player.z - INTERIOR_EXIT.z) < 2 }
+
+  enterBuilding(id: string): boolean {
+    if (this.interior) return false
+    const building = TOWN_BUILDINGS.find((item) => item.id === id && item.kind !== 'house')
+    if (!building) return false
+    const door = townBuildingDoor(building)
+    if (Math.hypot(this.player.x - door[0], this.player.z - door[1]) > 2.6) return false
+    this.exterior = { x: this.player.x, z: this.player.z, facing: this.player.facing }
+    this.interior = building
+    Object.assign(this.player, { x: 0, z: 4.7, facing: Math.PI, attackPulse: 0, hurtPulse: 0 })
+    return true
+  }
+
+  exitInterior(): boolean {
+    if (!this.canExitInterior) return false
+    this.interior = null
+    Object.assign(this.player, this.exterior)
+    return true
   }
 
   toggleTorch(): void {
@@ -77,12 +111,31 @@ export class WorldState {
 
   update(dt: number, input: MovementInput, attack: boolean): void {
     this.elapsed += dt
+    this.updateResidents(dt)
     this.player.attackPulse = Math.max(0, this.player.attackPulse - dt)
     this.player.hurtPulse = Math.max(0, this.player.hurtPulse - dt)
 
     if (this.player.hp <= 0) {
       this.deathTimer += dt
       if (this.deathTimer >= 1.7) this.respawn()
+      return
+    }
+
+    if (this.interior) {
+      const speed = input.running && this.player.stamina > 1 ? 5.4 : 3.8
+      if (input.x || input.z) {
+        this.player.facing = Math.atan2(input.x, input.z)
+        const clear = (x: number, z: number): boolean => {
+          if (Math.abs(x) > INTERIOR_WIDTH / 2 - 0.7 || Math.abs(z) > INTERIOR_DEPTH / 2 - 0.7) return false
+          const kind = this.interior!.kind
+          return kind === 'house' || !INTERIOR_FURNITURE[kind].some((rect) => pointInRect(x, z, rect, PLAYER_RADIUS))
+        }
+        const nx = this.player.x + input.x * speed * dt
+        if (clear(nx, this.player.z)) this.player.x = nx
+        const nz = this.player.z + input.z * speed * dt
+        if (clear(this.player.x, nz)) this.player.z = nz
+      }
+      this.player.stamina = Math.min(100, this.player.stamina + dt * 15)
       return
     }
 
@@ -121,6 +174,7 @@ export class WorldState {
   }
 
   private collidesTree(x: number, z: number, radius: number): boolean {
+    if (settlementBlocked(x, z, radius)) return true
     for (const tree of this.trees) {
       const minDistance = radius + tree.radius + TREE_CLEARANCE
       const dx = x - tree.x
@@ -128,6 +182,32 @@ export class WorldState {
       if (dx * dx + dz * dz < minDistance * minDistance) return true
     }
     return false
+  }
+
+  private updateResidents(dt: number): void {
+    for (const resident of this.residents) {
+      resident.walking = false
+      if (!this.interior && Math.hypot(resident.x - this.player.x, resident.z - this.player.z) < 2.5) {
+        resident.facing = Math.atan2(this.player.x - resident.x, this.player.z - resident.z)
+        continue
+      }
+      resident.pause = Math.max(0, resident.pause - dt)
+      if (resident.pause > 0) continue
+      const goal = resident.route[resident.waypoint]!
+      const dx = goal[0] - resident.x, dz = goal[1] - resident.z
+      const distance = Math.hypot(dx, dz)
+      if (distance < 0.08) {
+        resident.waypoint = (resident.waypoint + 1) % resident.route.length
+        resident.pause = resident.farmer ? 5 : 3
+        continue
+      }
+      const step = Math.min(distance, dt * (resident.farmer ? 0.55 : 0.72))
+      const nx = resident.x + dx / distance * step, nz = resident.z + dz / distance * step
+      if (!settlementBlocked(nx, nz, 0.3)) {
+        resident.x = nx; resident.z = nz; resident.walking = true
+        resident.facing = Math.atan2(dx, dz)
+      } else { resident.waypoint = (resident.waypoint + 1) % resident.route.length; resident.pause = 2 }
+    }
   }
 
   private resolveAttack(): void {

@@ -71,6 +71,8 @@ export class GameSession {
     this.map.close(this.world)
   }
 
+  private readonly handleInteractionChange = (): void => { this.syncInputState() }
+
   private readonly handleVisibility = (): void => {
     this.syncInputState()
     this.lastTime = performance.now()
@@ -100,6 +102,7 @@ export class GameSession {
     window.addEventListener('keydown', this.handleKeyDown, { passive: false })
     this.map.element.addEventListener('world-map:toggle', this.handleMapToggle)
     this.map.element.addEventListener('world-map:close', this.handleMapClose)
+    this.interaction.element.addEventListener('interaction:change', this.handleInteractionChange)
     document.addEventListener('visibilitychange', this.handleVisibility)
   }
 
@@ -124,6 +127,7 @@ export class GameSession {
     document.removeEventListener('visibilitychange', this.handleVisibility)
     this.input.destroy(this.element)
     this.map.destroy()
+    this.interaction.element.removeEventListener('interaction:change', this.handleInteractionChange)
     this.interaction.destroy()
     this.hud.destroy()
     this.campEnhancer.destroy()

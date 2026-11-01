@@ -246,3 +246,19 @@
   .tent-interior__bed { left: 10%; width: 54%; }
   .tent-interior__copy { right: 4%; bottom: 5%; }
 }
+
+/* Dialogue uses the same quiet glyphs, fine rules and faded gold as the menu. */
+.camp-dialogue__panel { position: relative; border-color: rgba(215,219,205,.2); padding: 18px 24px; background: rgba(5,9,7,.96); }
+.camp-dialogue__panel::before, .camp-dialogue__panel::after { position: absolute; color: #a4ac99; font: 12px monospace; }
+.camp-dialogue__panel::before { content: '+'; top: -8px; left: -5px; }
+.camp-dialogue__panel::after { content: '+'; bottom: -8px; right: -5px; }
+.camp-dialogue__eyebrow { display: flex; justify-content: space-between; padding-bottom: 12px; margin-bottom: 17px; border-bottom: 1px dashed rgba(197,205,184,.15); color: rgba(197,205,184,.4); font-size: 9px; letter-spacing: .16em; }
+.camp-dialogue__body { display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 20px; }
+.camp-dialogue__portrait { margin: 3px 0; font: 11px/1.25 ui-monospace, monospace; color: rgba(196,179,130,.5); }
+.camp-dialogue__name { color: #c6b68b; font-size: 10px; }
+.camp-dialogue__text { min-height: 3.3em; font-size: clamp(12px,1.5vw,15px); }
+.camp-dialogue__actions { display: flex; justify-content: space-between; gap: 15px; padding-top: 12px; border-top: 1px solid rgba(197,205,184,.12); }
+.camp-dialogue__actions button { border: 0; background: none; padding: 7px 0; color: rgba(218,225,208,.65); font: 10px ui-monospace, monospace; cursor: pointer; }
+.camp-dialogue__actions button:hover, .camp-dialogue__actions button:focus-visible { color: #e5d7ae; outline: 1px dotted #9d967e; outline-offset: 4px; }
+@media (max-width: 600px) { .camp-dialogue__body { grid-template-columns: 1fr; } .camp-dialogue__portrait { display: none; } .camp-dialogue__panel { padding: 14px; } .camp-dialogue { padding-bottom: 30px; } }
+@media (prefers-reduced-motion: reduce) { .camp-dialogue, .camp-interaction__prompt { transition: none; } }

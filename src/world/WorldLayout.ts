@@ -10,7 +10,7 @@ export type WorldLandmark = {
 }
 
 export type WorldZone = {
-  id: 'river' | 'ruins' | 'meadow' | 'forest' | 'highland' | 'wilds'
+  id: 'river' | 'ruins' | 'meadow' | 'forest' | 'highland' | 'town' | 'wilds'
   name: string
   x: number
   z: number
@@ -59,8 +59,31 @@ export type WorldStructure = {
   height: number
 }
 
-export const WORLD_LIMIT = 92
+export type TownBuilding = {
+  id: string
+  name: string
+  kind: 'inn' | 'smithy' | 'house' | 'hall'
+  x: number
+  z: number
+  rotation: number
+  width: number
+  depth: number
+}
+
+export type TownField = {
+  id: string
+  x: number
+  z: number
+  width: number
+  depth: number
+  rotation: number
+  crop: 'grain' | 'rye'
+}
+
+export const WORLD_LIMIT = 138
 export const RIVER_HALF_WIDTH = 6.8
+export const TOWN_CENTER = { x: -25, z: 105 } as const
+export const TOWN_WALL = { width: 44, depth: 40, gateWidth: 7 } as const
 
 const WILDS_ZONE: WorldZone = { id: 'wilds', name: 'дикие земли', x: 0, z: 0, radius: 1 }
 
@@ -70,6 +93,7 @@ export const WORLD_ZONES: readonly WorldZone[] = [
   { id: 'meadow', name: 'северные поля', x: -10, z: 52, radius: 33 },
   { id: 'forest', name: 'тёмная чаща', x: 50, z: 25, radius: 35 },
   { id: 'highland', name: 'каменный перевал', x: 36, z: -52, radius: 34 },
+  { id: 'town', name: 'Седой Бор · город-крепость', ...TOWN_CENTER, radius: 34 },
 ]
 
 export const WORLD_ROADS: readonly WorldRoad[] = [
@@ -83,7 +107,31 @@ export const WORLD_ROADS: readonly WorldRoad[] = [
     id: 'north-road',
     name: 'северный тракт',
     width: 3.2,
-    points: [[4, 4], [1, 19], [-5, 35], [-10, 51], [-11, 69], [-7, 84]],
+    points: [[4, 4], [1, 19], [-5, 35], [-10, 51], [-11, 69], [-7, 78], [-25, 80], [-25, 86]],
+  },
+  {
+    id: 'town-street',
+    name: 'улицы Седого Бора',
+    width: 2.7,
+    points: [[-25, 86], [-25, 98], [-25, 112]],
+  },
+  {
+    id: 'market-lane',
+    name: 'рыночный проезд',
+    width: 2.4,
+    points: [[-43, 101], [-34, 101], [-25, 101], [-16, 101], [-7, 101]],
+  },
+  {
+    id: 'field-track',
+    name: 'колейная дорога',
+    width: 2.6,
+    points: [[-25, 80], [-51, 80], [-54, 90], [-68, 101]],
+  },
+  {
+    id: 'east-field-track',
+    name: 'дорога к жатве',
+    width: 2.6,
+    points: [[-25, 80], [1, 80], [4, 94], [17, 101]],
   },
   {
     id: 'highland-road',
@@ -138,7 +186,30 @@ export const WORLD_STRUCTURES: readonly WorldStructure[] = [
   { id: 'north-chapel', name: 'северная часовня', kind: 'chapel', x: -10, z: 61, rotation: -0.05, width: 13, depth: 15, height: 8 },
 ]
 
+export const TOWN_BUILDINGS: readonly TownBuilding[] = [
+  { id: 'grey-boar-inn', name: 'трактир «Серый вепрь»', kind: 'inn', x: -38, z: 95, rotation: 0, width: 10, depth: 8 },
+  { id: 'town-smithy', name: 'кузница', kind: 'smithy', x: -12, z: 95, rotation: 0, width: 9, depth: 8 },
+  { id: 'north-house', name: 'дом гончара', kind: 'house', x: -38, z: 112, rotation: 0, width: 9, depth: 8 },
+  { id: 'east-house', name: 'дом старосты', kind: 'house', x: -12, z: 112, rotation: 0, width: 9, depth: 8 },
+  { id: 'town-hall', name: 'ратуша', kind: 'hall', x: -25, z: 118, rotation: 0, width: 13, depth: 9 },
+]
+
+export const TOWN_FIELDS: readonly TownField[] = [
+  { id: 'west-grain-fields', x: -70, z: 104, width: 30, depth: 38, rotation: -0.16, crop: 'grain' },
+  { id: 'east-rye-fields', x: 18, z: 105, width: 32, depth: 40, rotation: 0.12, crop: 'rye' },
+  { id: 'south-garden', x: -25, z: 71, width: 22, depth: 12, rotation: 0, crop: 'rye' },
+]
+
+export function townBuildingDoor(building: TownBuilding): WorldPoint {
+  const localZ = -building.depth * 0.5 - 1.35
+  const c = Math.cos(building.rotation)
+  const s = Math.sin(building.rotation)
+  return [building.x + s * localZ, building.z + c * localZ]
+}
+
 export const WORLD_FIRES: readonly WorldFire[] = [
+  { x: -28.5, z: 87, strength: 0.8, radius: 10 },
+  { x: -21.5, z: 103, strength: 0.8, radius: 12 },
   { x: -48, z: -10, strength: 1, radius: 10 },
   { x: -54, z: -21, strength: 0.85, radius: 8 },
   { x: 53, z: 26, strength: 0.9, radius: 9 },
@@ -211,6 +282,10 @@ export function terrainHeightAt(x: number, z: number): number {
   height += radialInfluence(x, z, 68, -49, 22) * 0.9
   height -= radialInfluence(x, z, -70, 22, 20) * 0.3
 
+  const townDistance = Math.max(Math.abs(x - TOWN_CENTER.x) - 25, Math.abs(z - TOWN_CENTER.z) - 23)
+  const townBlend = 1 - clamp01(townDistance / 8)
+  height = height * (1 - townBlend) + 0.06 * townBlend
+
   const roadDistance = roadDistanceAt(x, z)
   if (roadDistance < 1.8 && riverDistance > RIVER_HALF_WIDTH + 1) {
     height -= (1 - clamp01(roadDistance / 1.8)) * 0.09
@@ -239,6 +314,7 @@ export function walkHeightAt(x: number, z: number): number {
 }
 
 export function zoneAt(x: number, z: number): WorldZone {
+  if (Math.hypot(x - TOWN_CENTER.x, z - TOWN_CENTER.z) <= 34) return WORLD_ZONES.find((zone) => zone.id === 'town')!
   if (Math.abs(riverSignedDistance(x, z)) < RIVER_HALF_WIDTH + 5.5) return WORLD_ZONES[0]!
 
   let best: WorldZone | null = null
@@ -318,6 +394,8 @@ export function createWorldLandmarks(): WorldLandmark[] {
       const x = cx + Math.cos(angle) * radiusX * r
       const z = cz + Math.sin(angle) * radiusZ * r
       if (Math.hypot(x - cx, z - cz) < inner) continue
+      if (Math.abs(x) > WORLD_LIMIT - 4 || Math.abs(z) > WORLD_LIMIT - 4) continue
+      if (z > 62 && z < 132 && x > -90 && x < 42) continue
       if (Math.abs(riverSignedDistance(x, z)) < RIVER_HALF_WIDTH + 2.8) continue
       if (roadDistanceAt(x, z) < 2.8) continue
       if (insideStructure(x, z, 2.5)) continue
@@ -345,6 +423,10 @@ export function createWorldLandmarks(): WorldLandmark[] {
   addTrees(-49, -15, 32, 35, 28, 16, 2.8)
   addTrees(37, -54, 28, 38, 28, 17, 3.0)
   addTrees(-71, 30, 20, 20, 24, 5, 2.6)
+
+  addTrees(-106, 96, 42, 22, 32, 5, 3)
+  addTrees(75, 101, 52, 30, 29, 6, 3)
+  addTrees(-103, -65, 32, 23, 35, 5, 3)
 
   return landmarks
 }

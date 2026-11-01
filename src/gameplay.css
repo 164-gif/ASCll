@@ -300,3 +300,5 @@
   .world-glyph-canvas { transition: none !important; }
   .game-hud__hint { animation: none; }
 }
+
+.game-hud__environment { color: rgba(207,196,162,.7); font-size: 9px; letter-spacing: .1em; padding-top: 6px; }

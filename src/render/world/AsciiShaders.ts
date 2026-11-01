@@ -1,3 +1,16 @@
+const ATMOSPHERE = /* glsl */ `
+uniform float uDaylight;
+uniform float uFogDensity;
+uniform vec3 uSkyTint;
+uniform vec3 uSunDirection;
+uniform float uIndoor;
+vec3 atmosphere(vec3 color, vec3 position, float localLight) {
+  float light = mix(0.22 + 0.78 * uDaylight, 1.0, clamp(localLight, 0.0, 1.0));
+  float haze = 1.0 - exp(-pow(length(position.xz - uPlayerPos.xz) * uFogDensity, 2.0));
+  return mix(color * light * uSkyTint, vec3(0.075, 0.10, 0.095) * (0.4 + uDaylight * 0.6), haze * 0.88);
+}
+`
+
 export const ASCII_COMMON = /* glsl */ `
 uniform sampler2D uAsciiTex;
 uniform vec3 uCamRight;
@@ -7,6 +20,7 @@ uniform vec3 uPlayerPos;
 uniform vec3 uTorchPos;
 uniform float uTorchPower;
 uniform vec4 uWorldLights[8];
+${ATMOSPHERE}
 
 float hash21(vec2 p) {
   p = fract(p * vec2(234.34, 435.345));
@@ -74,7 +88,7 @@ void main() {
 export const groundFragmentShader = /* glsl */ `
 ${ASCII_COMMON}
 uniform vec4 uRipples[18];
-uniform vec4 uRoadSegments[32];
+uniform vec4 uRoadSegments[64];
 uniform float uRoadCount;
 varying vec3 vWorldPos;
 
@@ -93,7 +107,7 @@ float lineSegmentDistance(vec2 p, vec4 segment) {
 
 float roadDistance(vec2 p) {
   float best = 999.0;
-  for (int i = 0; i < 32; i++) {
+  for (int i = 0; i < 64; i++) {
     if (float(i) < uRoadCount) best = min(best, lineSegmentDistance(p, uRoadSegments[i]));
   }
   return best;
@@ -209,7 +223,7 @@ void main() {
     vec3 waveCol = mix(coldWave, warmWave, warm);
     vec3 charCol = mix(stoneCol * (0.55 + lum), waveCol, clamp(activity, 0.0, 1.0));
     charCol += vec3(0.8, 0.48, 0.12) * worldGlow * 0.18;
-    gl_FragColor = vec4(mix(waterBg, charCol, glyph * clamp(lum * 1.8, 0.18, 1.0)), 1.0);
+    gl_FragColor = vec4(atmosphere(mix(waterBg, charCol, glyph * clamp(lum * 1.8, 0.18, 1.0)), vWorldPos, torch + worldGlow), 1.0);
     return;
   }
 
@@ -240,7 +254,7 @@ void main() {
   roadCol += vec3(0.42, 0.28, 0.1) * worldGlow * 0.45;
   vec3 groundCol = mix(soil * (0.55 + 0.45 * shadow), lit, glyph * (0.52 + bank * 0.22 + torch * 0.25));
   groundCol = mix(groundCol, mix(roadDark, roadCol, roadGlyph * 0.82), roadMask * 0.94);
-  gl_FragColor = vec4(groundCol, 1.0);
+  gl_FragColor = vec4(atmosphere(groundCol, vWorldPos, torch + worldGlow), 1.0);
 }
 `
 
@@ -248,9 +262,15 @@ export const objectVertexShader = /* glsl */ `
 varying vec3 vWorldPos;
 varying vec3 vNormal;
 void main() {
-  vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+  vec4 localPosition = vec4(position, 1.0);
+  vec3 localNormal = normal;
+  #ifdef USE_INSTANCING
+    localPosition = instanceMatrix * localPosition;
+    localNormal = mat3(instanceMatrix) * localNormal;
+  #endif
+  vec4 worldPosition = modelMatrix * localPosition;
   vWorldPos = worldPosition.xyz;
-  vNormal = normalize(mat3(modelMatrix) * normal);
+  vNormal = normalize(mat3(modelMatrix) * localNormal);
   gl_Position = projectionMatrix * viewMatrix * worldPosition;
 }
 `
@@ -270,14 +290,14 @@ void main() {
   vec3 quantWorld;
   asciiGrid(vWorldPos, cellID, cellUV, quantWorld);
 
-  vec3 sunDir = normalize(vec3(-0.72, 0.65, -0.45));
+  vec3 sunDir = normalize(uSunDirection);
   float diff = clamp(dot(normalize(vNormal), sunDir), 0.0, 1.0);
   vec3 toTorch = uTorchPos - vWorldPos;
   float distTorch = length(toTorch);
   float torchDiff = clamp(dot(normalize(vNormal), normalize(toTorch + vec3(0.001))), 0.0, 1.0);
   float torch = uTorchPower * (0.35 + 0.65 * torchDiff) * exp(-distTorch * distTorch * 0.045);
   float worldGlow = worldGlowAt(vWorldPos.xz) * (0.92 + 0.08 * sin(uTime * 6.7));
-  float totalLight = clamp(0.15 + diff * 0.82 + torch * 0.9 + worldGlow * 0.6 + uEmissive, 0.04, 1.0);
+  float totalLight = clamp(0.15 + diff * 0.82 + uIndoor * 0.3 + torch * 0.9 + worldGlow * 0.6 + uEmissive, 0.04, 1.0);
 
   float rnd = hash21(cellID + uCharOffset);
   float charIdx = clamp(floor(totalLight * 52.0 + (rnd - 0.5) * 11.0), 2.0, 62.0);
@@ -287,7 +307,7 @@ void main() {
   lit += vec3(0.95, 0.72, 0.28) * torch * 0.58;
   lit += vec3(1.0, 0.58, 0.16) * worldGlow * 0.55;
   vec3 bg = uDarkColor * 0.16;
-  gl_FragColor = vec4(mix(bg, lit * 1.15, glyph), 1.0);
+  gl_FragColor = vec4(atmosphere(mix(bg, lit * 1.15, glyph), vWorldPos, torch + worldGlow + uEmissive), 1.0);
 }
 `
 
@@ -328,6 +348,8 @@ void main() {
 `
 
 export const grassFragmentShader = /* glsl */ `
+uniform vec3 uPlayerPos;
+${ATMOSPHERE}
 uniform vec3 uTorchPos;
 uniform float uTorchPower;
 uniform vec4 uWorldLights[8];
@@ -361,6 +383,6 @@ void main() {
   }
   col += vec3(0.72, 0.53, 0.18) * torch * (0.3 + 0.7 * vHeightFrac);
   col += vec3(0.92, 0.54, 0.14) * worldGlow * (0.18 + 0.82 * vHeightFrac);
-  gl_FragColor = vec4(col, 1.0);
+  gl_FragColor = vec4(atmosphere(col, vWorldPos, torch + worldGlow), 1.0);
 }
 `

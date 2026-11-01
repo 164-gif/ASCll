@@ -3,6 +3,10 @@ import {
   RIVER_HALF_WIDTH,
   WORLD_BRIDGES,
   WORLD_LIMIT,
+  TOWN_BUILDINGS,
+  TOWN_CENTER,
+  TOWN_WALL,
+  TOWN_FIELDS,
   WORLD_ROADS,
   WORLD_STRUCTURES,
   riverCenterZ,
@@ -18,7 +22,7 @@ type Sector = {
 }
 
 const SECTORS: readonly Sector[] = [
-  { id: 'north', title: 'СЕВЕРНЫЕ ПОЛЯ', subtitle: 'часовня · тракт', col: 0, row: 0 },
+  { id: 'north', title: 'СЕДОЙ БОР', subtitle: 'город · северные поля', col: 0, row: 0 },
   { id: 'forest', title: 'ТЁМНАЯ ЧАЩА', subtitle: 'лагерь · лес', col: 1, row: 0 },
   { id: 'ruins', title: 'СТАРЫЕ РУИНЫ', subtitle: 'аббатство', col: 0, row: 1 },
   { id: 'highland', title: 'КАМЕННЫЙ ПЕРЕВАЛ', subtitle: 'мост · крепость', col: 1, row: 1 },
@@ -52,8 +56,8 @@ export class WorldMap {
       <div class="world-map__frame readable-map__frame">
         <header class="world-map__header readable-map__header">
           <div>
-            <span class="world-map__eyebrow">карта мира · 4 сектора</span>
-            <strong>лесная долина</strong>
+            <span class="world-map__eyebrow">карта мира · северный тракт</span>
+            <strong>лесная долина и Седой Бор</strong>
           </div>
           <button class="world-map__close" type="button" aria-label="Закрыть карту">M / ESC</button>
         </header>
@@ -66,7 +70,7 @@ export class WorldMap {
           <span><i class="readable-map__water-key"></i>вода</span>
           <span>△ лагерь</span>
           <span>═ мост</span>
-          <span>⌂ строение</span>
+          <span>⌂ строение</span><span style="color:#a2b18c">· жители</span>
         </footer>
       </div>
     `
@@ -171,6 +175,7 @@ export class WorldMap {
     this.drawRoads(ctx, size)
     this.drawBridges(ctx, size)
     this.drawLandmarks(ctx, size)
+    this.drawSettlement(ctx, size)
     this.drawSectorLabels(ctx, size)
 
     ctx.strokeStyle = 'rgba(230,216,166,.26)'
@@ -313,6 +318,37 @@ export class WorldMap {
     }
   }
 
+  private drawSettlement(ctx: CanvasRenderingContext2D, size: number): void {
+    const scale = size / (WORLD_LIMIT * 2)
+    ctx.save()
+    for (const field of TOWN_FIELDS) {
+      const p = this.worldToCanvas(field.x, field.z, size)
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(field.rotation)
+      ctx.fillStyle = 'rgba(141,123,65,.18)'
+      ctx.fillRect(-field.width * scale / 2, -field.depth * scale / 2, field.width * scale, field.depth * scale)
+      ctx.strokeStyle = 'rgba(185,156,85,.4)'; ctx.lineWidth = 1
+      for (let x = -field.width / 2; x < field.width / 2; x += 3) {
+        ctx.beginPath(); ctx.moveTo(x * scale, -field.depth * scale / 2); ctx.lineTo(x * scale, field.depth * scale / 2); ctx.stroke()
+      }
+      ctx.restore()
+    }
+    const town = this.worldToCanvas(TOWN_CENTER.x, TOWN_CENTER.z, size)
+    ctx.strokeStyle = '#a0aa9b'; ctx.fillStyle = '#121a15'; ctx.lineWidth = 2
+    const w = TOWN_WALL.width * scale, d = TOWN_WALL.depth * scale
+    ctx.fillRect(town.x - w / 2, town.y - d / 2, w, d)
+    ctx.beginPath(); ctx.moveTo(town.x - TOWN_WALL.gateWidth * scale / 2, town.y + d / 2)
+    ctx.lineTo(town.x - w / 2, town.y + d / 2); ctx.lineTo(town.x - w / 2, town.y - d / 2)
+    ctx.lineTo(town.x + w / 2, town.y - d / 2); ctx.lineTo(town.x + w / 2, town.y + d / 2)
+    ctx.lineTo(town.x + TOWN_WALL.gateWidth * scale / 2, town.y + d / 2); ctx.stroke()
+    for (const building of TOWN_BUILDINGS) {
+      const p = this.worldToCanvas(building.x, building.z, size)
+      ctx.fillStyle = building.kind === 'house' ? '#77816e' : '#c0a66c'
+      ctx.fillRect(p.x - building.width * scale / 2, p.y - building.depth * scale / 2, building.width * scale, building.depth * scale)
+    }
+    this.drawLabel(ctx, town.x, town.y + d / 2 + 12, 'СЕДОЙ БОР', 'ворота · трактир · кузница', 'center')
+    ctx.restore()
+  }
+
   private drawSectorLabels(ctx: CanvasRenderingContext2D, size: number): void {
     const half = size * 0.5
     for (const sector of SECTORS) {
@@ -336,8 +372,8 @@ export class WorldMap {
   }
 
   private drawActiveSector(world: WorldState, size: number): void {
-    const col = world.player.x >= 0 ? 1 : 0
-    const row = world.player.z >= 0 ? 0 : 1
+    const col = world.mapPosition.x >= 0 ? 1 : 0
+    const row = world.mapPosition.z >= 0 ? 0 : 1
     const half = size * 0.5
     this.ctx.save()
     this.ctx.strokeStyle = 'rgba(245,205,104,.7)'
@@ -357,10 +393,14 @@ export class WorldMap {
       this.ctx.fill()
     }
 
-    const player = this.worldToCanvas(world.player.x, world.player.z, size)
+    for (const resident of world.residents) {
+      const p = this.worldToCanvas(resident.x, resident.z, size)
+      this.ctx.fillStyle = '#a2b18c'; this.ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3)
+    }
+    const player = this.worldToCanvas(world.mapPosition.x, world.mapPosition.z, size)
     this.ctx.save()
     this.ctx.translate(player.x, player.y)
-    this.ctx.rotate(-world.player.facing)
+    this.ctx.rotate(-world.mapPosition.facing)
     this.ctx.beginPath()
     this.ctx.arc(0, 0, 10, 0, Math.PI * 2)
     this.ctx.strokeStyle = 'rgba(255,205,91,.42)'
@@ -382,7 +422,7 @@ export class WorldMap {
     this.ctx.fillStyle = 'rgba(236,232,211,.78)'
     this.ctx.font = `${Math.max(9, Math.floor(size * 0.012))}px ui-monospace, monospace`
     this.ctx.textAlign = 'left'
-    this.ctx.fillText(`${world.currentZone.name}  ·  ${world.player.x.toFixed(0)}, ${world.player.z.toFixed(0)}`, 14, size - 14)
+    this.ctx.fillText(`${world.currentZone.name}  ·  ${world.mapPosition.x.toFixed(0)}, ${world.mapPosition.z.toFixed(0)}`, 14, size - 14)
   }
 
   private drawTentIcon(ctx: CanvasRenderingContext2D, x: number, y: number, size: number): void {

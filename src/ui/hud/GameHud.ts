@@ -8,6 +8,7 @@ export class GameHud {
   private readonly objective: HTMLElement
   private readonly status: HTMLElement
   private readonly torch: HTMLElement
+  private readonly environment: HTMLElement
 
   constructor(parent: HTMLElement) {
     this.element = document.createElement('div')
@@ -17,10 +18,10 @@ export class GameHud {
         <span class="game-hud__name">wanderer</span>
         <div class="game-hud__meter"><span>hp</span><i data-hp></i></div>
         <div class="game-hud__meter game-hud__meter--stamina"><span>st</span><i data-stamina></i></div>
-        <span class="game-hud__name" data-torch></span>
+        <span class="game-hud__name" data-torch></span><span class="game-hud__environment" data-environment></span>
       </div>
       <div class="game-hud__objective" data-objective>речная низина</div>
-      <div class="game-hud__hint">WASD двигаться · SHIFT бег · SPACE / ЛКМ удар · F свет · M карта · Z макро ASCII · колесо масштаб · ESC меню</div>
+      <div class="game-hud__hint">WASD двигаться · E разговор / дверь · SHIFT бег · SPACE / ЛКМ удар · F свет · M карта · Z макро ASCII · колесо масштаб · ESC меню</div>
       <div class="game-hud__event" data-status></div>
     `
 
@@ -31,6 +32,7 @@ export class GameHud {
     const torch = this.element.querySelector<HTMLElement>('[data-torch]')
     if (!hp || !stamina || !objective || !status || !torch) throw new Error('HUD nodes are unavailable')
 
+    this.environment = this.element.querySelector<HTMLElement>('[data-environment]')!
     this.hp = hp
     this.stamina = stamina
     this.objective = objective
@@ -44,8 +46,12 @@ export class GameHud {
     this.stamina.style.transform = `scaleX(${Math.max(0, world.player.stamina) / 100})`
     this.torch.textContent = world.torchOn ? 'f · light on' : 'f · light off'
 
+    const environment = world.environment
+    const hour = Math.floor(environment.hour).toString().padStart(2, '0')
+    const minute = Math.floor((environment.hour % 1) * 60).toString().padStart(2, '0')
+    this.environment.textContent = `${hour}:${minute} · ${environment.label}${world.interior ? ' / под крышей' : ''}`
     const zone = world.currentZone
-    if (isInsideRiver(world.player.x, world.player.z)) this.objective.textContent = `${zone.name} · течение`
+    if (!world.interior && isInsideRiver(world.player.x, world.player.z)) this.objective.textContent = `${zone.name} · течение`
     else if (world.kills > 0) this.objective.textContent = `${zone.name} · ${world.kills} fallen`
     else this.objective.textContent = zone.name
 

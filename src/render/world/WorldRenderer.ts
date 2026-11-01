@@ -3,6 +3,9 @@ import { type EnemyState, type WorldState } from '../../simulation/WorldState'
 import {
   RIVER_HALF_WIDTH,
   WORLD_BRIDGES,
+  WORLD_LIMIT,
+  TOWN_CENTER,
+  TOWN_WALL,
   WORLD_FIRES,
   WORLD_ROAD_SEGMENTS,
   bridgeDeckHeightAt,
@@ -25,10 +28,14 @@ import {
   objectVertexShader,
 } from './AsciiShaders'
 
+import { SettlementRenderer } from './SettlementRenderer'
+import { WeatherRenderer } from './WeatherRenderer'
+import { cultivatedAt } from '../../world/Settlement'
+
 const BASE_FRUSTUM = 21
 const MAX_RIPPLES = 18
-const MAX_ROAD_SEGMENTS = 32
-const WORLD_RENDER_SIZE = 202
+const MAX_ROAD_SEGMENTS = 64
+const WORLD_RENDER_SIZE = WORLD_LIMIT * 2 + 20
 const FOREST_CAMP_X = 55
 const FOREST_CAMP_Z = 29
 
@@ -44,6 +51,9 @@ type ObjectMaterial = THREE.ShaderMaterial & {
 export class WorldRenderer {
   readonly element: HTMLCanvasElement
 
+  private readonly settlement: SettlementRenderer
+  private readonly weather: WeatherRenderer
+  private lastInterior: string | null = null
   private readonly scene = new THREE.Scene()
   private readonly camera = new THREE.OrthographicCamera(-10, 10, 10, -10, -100, 240)
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
@@ -70,7 +80,13 @@ export class WorldRenderer {
       : new THREE.Vector4(999, 999, 0, 1)
   })
 
+  private readonly atmosphereUniforms = {
+    uDaylight: { value: 1 }, uFogDensity: { value: 0.003 },
+    uSkyTint: { value: new THREE.Color(1, 1, 1) },
+    uSunDirection: { value: new THREE.Vector3(-0.72, 0.65, -0.45) }, uIndoor: { value: 0 },
+  }
   private readonly shared = {
+    ...this.atmosphereUniforms,
     uAsciiTex: { value: this.atlas },
     uCamRight: { value: this.camRight },
     uCamUp: { value: this.camUp },
@@ -126,6 +142,8 @@ export class WorldRenderer {
     this.buildForestCamp()
     this.buildGrass(world)
     this.buildKnight()
+    this.settlement = new SettlementRenderer(this.scene, this.createAsciiMaterial.bind(this))
+    this.weather = new WeatherRenderer(this.scene)
 
     this.resizeObserver = new ResizeObserver(this.resize)
     this.resizeObserver.observe(parent)
@@ -135,7 +153,24 @@ export class WorldRenderer {
   render(world: WorldState, dt: number): void {
     if (this.disposed) return
 
-    const playerY = walkHeightAt(world.player.x, world.player.z)
+    const interiorId = world.interior?.id ?? null
+    const playerY = world.interior ? 0 : walkHeightAt(world.player.x, world.player.z)
+    const activeScene = world.interior ? this.settlement.interiorScene : this.scene
+    if (this.playerGroup.parent !== activeScene) activeScene.add(this.playerGroup)
+    if (interiorId !== this.lastInterior) {
+      this.camera.position.set(world.player.x, playerY + 26, world.player.z + 22)
+      this.lastX = world.player.x; this.lastZ = world.player.z; this.stepDistance = 0
+      this.lastInterior = interiorId
+    }
+    const environment = world.environment
+    const indoors = !!world.interior
+    this.atmosphereUniforms.uIndoor.value = indoors ? 1 : 0
+    this.atmosphereUniforms.uDaylight.value = indoors ? 0.92 : environment.daylight * (1 - environment.cloud * 0.3)
+    this.atmosphereUniforms.uFogDensity.value = indoors ? 0 : environment.fog
+    this.atmosphereUniforms.uSkyTint.value.setRGB(indoors ? 1.12 : 0.72 + environment.daylight * 0.28, indoors ? 1.02 : 0.82 + environment.daylight * 0.18, indoors ? 0.85 : 1)
+    this.atmosphereUniforms.uSunDirection.value.set(Math.cos(environment.hour / 12 * Math.PI), 0.35 + environment.daylight, -0.45).normalize()
+    this.settlement.update(world)
+    this.weather.update(world)
     this.shared.uTime.value = world.elapsed
     this.shared.uPlayerPos.value.set(world.player.x, playerY, world.player.z)
 
@@ -159,7 +194,7 @@ export class WorldRenderer {
     this.syncPlayer(world, dt)
     this.syncEnemies(world.enemies)
     this.syncCamera(world, dt)
-    this.renderer.render(this.scene, this.camera)
+    this.renderer.render(activeScene, this.camera)
   }
 
   adjustZoom(delta: number): void {
@@ -176,7 +211,8 @@ export class WorldRenderer {
     if (this.disposed) return
     this.disposed = true
     this.resizeObserver.disconnect()
-    this.scene.traverse((object) => {
+    this.weather.destroy()
+    for (const scene of [this.scene, this.settlement.interiorScene]) scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return
       object.geometry.dispose()
       const materials = Array.isArray(object.material) ? object.material : [object.material]
@@ -192,6 +228,7 @@ export class WorldRenderer {
       vertexShader: objectVertexShader,
       fragmentShader: objectFragmentShader,
       uniforms: {
+        ...this.atmosphereUniforms,
         uAsciiTex: this.shared.uAsciiTex,
         uCamRight: this.shared.uCamRight,
         uCamUp: this.shared.uCamUp,
@@ -211,7 +248,7 @@ export class WorldRenderer {
   }
 
   private buildGround(): void {
-    const geometry = new THREE.PlaneGeometry(WORLD_RENDER_SIZE, WORLD_RENDER_SIZE, 96, 96)
+    const geometry = new THREE.PlaneGeometry(WORLD_RENDER_SIZE, WORLD_RENDER_SIZE, 200, 200)
     geometry.rotateX(-Math.PI / 2)
     const position = geometry.attributes.position
     if (position) {
@@ -670,8 +707,8 @@ export class WorldRenderer {
 
   private buildGrass(world: WorldState): void {
     const coarse = window.matchMedia('(pointer: coarse)').matches
-    const bladeCount = coarse ? 76000 : 164000
-    const spread = 182
+    const bladeCount = coarse ? 95000 : 200000
+    const spread = WORLD_LIMIT * 2
 
     const base = new THREE.BufferGeometry()
     base.setAttribute(
@@ -705,6 +742,8 @@ export class WorldRenderer {
       const riverDist = Math.abs(riverSignedDistance(x, z))
       if (riverDist < RIVER_HALF_WIDTH + 0.08) continue
       if (roadDistanceAt(x, z) < 0.72) continue
+      if (cultivatedAt(x, z)) continue
+      if (Math.abs(x - TOWN_CENTER.x) < TOWN_WALL.width / 2 + 3 && Math.abs(z - TOWN_CENTER.z) < TOWN_WALL.depth / 2 + 3) continue
       if (Math.hypot(x - FOREST_CAMP_X, z - FOREST_CAMP_Z) < 6.3) continue
 
       const zone = zoneAt(x, z)
@@ -766,6 +805,7 @@ export class WorldRenderer {
       vertexShader: grassVertexShader,
       fragmentShader: grassFragmentShader,
       uniforms: {
+        ...this.atmosphereUniforms,
         uTime: this.shared.uTime,
         uPlayerPos: this.shared.uPlayerPos,
         uTorchPos: this.shared.uTorchPos,
@@ -843,10 +883,10 @@ export class WorldRenderer {
 
     const riverDistance = Math.abs(riverSignedDistance(world.player.x, world.player.z))
     const onBridge = bridgeDeckHeightAt(world.player.x, world.player.z) !== null
-    const sink = isInsideRiver(world.player.x, world.player.z) && !onBridge
+    const sink = !world.interior && isInsideRiver(world.player.x, world.player.z) && !onBridge
       ? -0.28 * Math.min(1, (RIVER_HALF_WIDTH - riverDistance) * 0.6)
       : 0
-    const baseY = walkHeightAt(world.player.x, world.player.z)
+    const baseY = world.interior ? 0 : walkHeightAt(world.player.x, world.player.z)
 
     this.playerGroup.position.set(world.player.x, baseY + sink, world.player.z)
     this.playerGroup.rotation.y = world.player.facing
@@ -924,6 +964,7 @@ export class WorldRenderer {
   }
 
   private updateRipples(world: WorldState, dt: number): void {
+    if (world.interior) return
     const moved = Math.hypot(world.player.x - this.lastX, world.player.z - this.lastZ)
     const onBridge = bridgeDeckHeightAt(world.player.x, world.player.z) !== null
     if (isInsideRiver(world.player.x, world.player.z) && !onBridge && moved > 0.002) {
@@ -962,7 +1003,7 @@ export class WorldRenderer {
     this.camera.zoom = this.currentZoom
 
     const targetX = world.player.x
-    const targetY = walkHeightAt(world.player.x, world.player.z)
+    const targetY = world.interior ? 0 : walkHeightAt(world.player.x, world.player.z)
     const targetZ = world.player.z + 22
     this.camera.position.x += (targetX - this.camera.position.x) * Math.min(1, dt * 6)
     this.camera.position.y += (targetY + 26 - this.camera.position.y) * Math.min(1, dt * 4.5)
