@@ -6,16 +6,11 @@ type AudioScene = 'menu' | 'world'
 type Surface = 'grass' | 'water' | 'stone'
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
-const MUSIC_PART_COUNT = 13
+const TAU = Math.PI * 2
 
 export class AudioDirector {
   private readonly store = new AudioSettings()
   private settings: AudioSettingsState = this.store.get()
-  private musicDataPromise: Promise<ArrayBuffer>
-  private musicBuffer: AudioBuffer | null = null
-  private musicSource: AudioBufferSourceNode | null = null
-  private musicStartedAt = 0
-  private musicOffset = 0
 
   private context: AudioContext | null = null
   private masterGain: GainNode | null = null
@@ -30,6 +25,10 @@ export class AudioDirector {
   private fireGain: GainNode | null = null
   private dangerGain: GainNode | null = null
   private noiseBuffer: AudioBuffer | null = null
+  private menuScoreBuffer: AudioBuffer | null = null
+  private menuScoreSource: AudioBufferSourceNode | null = null
+  private menuScoreStartedAt = 0
+  private menuScoreOffset = 0
 
   private scene: AudioScene = 'menu'
   private lastPlayerX = 0
@@ -51,8 +50,6 @@ export class AudioDirector {
   }
 
   constructor() {
-    this.musicDataPromise = this.loadMusicBytes()
-
     window.addEventListener('ascii:audio-settings', this.handleSettings)
     document.addEventListener('visibilitychange', this.handleVisibility)
   }
@@ -62,11 +59,9 @@ export class AudioDirector {
     const context = this.context
     if (!context) return
 
-    const resume = context.state === 'suspended' ? context.resume() : Promise.resolve()
-    await resume
+    if (context.state === 'suspended') await context.resume()
     this.applySettings(true)
-    await this.ensureMusicBuffer()
-    if (this.scene === 'menu') this.startMusic()
+    if (this.scene === 'menu') this.startMenuScore()
   }
 
   entryConfirm(): void {
@@ -100,10 +95,10 @@ export class AudioDirector {
     const now = context.currentTime
     this.musicSceneGain.gain.cancelScheduledValues(now)
     this.musicSceneGain.gain.setValueAtTime(this.musicSceneGain.gain.value, now)
-    this.musicSceneGain.gain.linearRampToValueAtTime(0.06, now + 1.55)
+    this.musicSceneGain.gain.linearRampToValueAtTime(0.055, now + 1.55)
     this.musicFilter.frequency.cancelScheduledValues(now)
     this.musicFilter.frequency.setValueAtTime(Math.max(900, this.musicFilter.frequency.value), now)
-    this.musicFilter.frequency.exponentialRampToValueAtTime(620, now + 1.35)
+    this.musicFilter.frequency.exponentialRampToValueAtTime(520, now + 1.35)
     this.worldSceneGain.gain.cancelScheduledValues(now)
     this.worldSceneGain.gain.setValueAtTime(0, now)
     this.worldSceneGain.gain.linearRampToValueAtTime(0.55, now + 1.8)
@@ -129,7 +124,7 @@ export class AudioDirector {
     this.musicSceneGain.gain.setTargetAtTime(0, now, 0.2)
     this.musicFilter.frequency.setTargetAtTime(18000, now, 0.25)
     window.setTimeout(() => {
-      if (this.scene === 'world') this.stopMusic()
+      if (this.scene === 'world') this.stopMenuScore()
     }, 900)
   }
 
@@ -138,18 +133,15 @@ export class AudioDirector {
     const context = this.context
     if (!context || !this.worldSceneGain || !this.musicSceneGain || !this.musicFilter) return
 
-    void this.ensureMusicBuffer().then(() => {
-      if (this.scene === 'menu') this.startMusic()
-    })
-
+    this.startMenuScore()
     const now = context.currentTime
     this.worldSceneGain.gain.cancelScheduledValues(now)
     this.worldSceneGain.gain.setTargetAtTime(0, now, 0.3)
     this.musicFilter.frequency.cancelScheduledValues(now)
-    this.musicFilter.frequency.setValueAtTime(900, now)
-    this.musicFilter.frequency.exponentialRampToValueAtTime(18000, now + 1.2)
+    this.musicFilter.frequency.setValueAtTime(760, now)
+    this.musicFilter.frequency.exponentialRampToValueAtTime(18000, now + 1.3)
     this.musicSceneGain.gain.cancelScheduledValues(now)
-    this.musicSceneGain.gain.setValueAtTime(0.08, now)
+    this.musicSceneGain.gain.setValueAtTime(0.06, now)
     this.musicSceneGain.gain.linearRampToValueAtTime(1, now + 1.55)
   }
 
@@ -182,7 +174,9 @@ export class AudioDirector {
     this.setTarget(this.fireGain, world.torchOn ? 0.035 : 0, 0.16)
 
     let nearestEnemy = Number.POSITIVE_INFINITY
-    for (const enemy of world.enemies) nearestEnemy = Math.min(nearestEnemy, Math.hypot(enemy.x - world.player.x, enemy.z - world.player.z))
+    for (const enemy of world.enemies) {
+      nearestEnemy = Math.min(nearestEnemy, Math.hypot(enemy.x - world.player.x, enemy.z - world.player.z))
+    }
     const danger = nearestEnemy < 9 ? clamp01((9 - nearestEnemy) / 8) * 0.045 : 0
     this.setTarget(this.dangerGain, danger, 0.45)
 
@@ -213,73 +207,10 @@ export class AudioDirector {
   destroy(): void {
     window.removeEventListener('ascii:audio-settings', this.handleSettings)
     document.removeEventListener('visibilitychange', this.handleVisibility)
-    this.stopMusic(false)
-    this.musicBuffer = null
+    this.stopMenuScore(false)
+    this.menuScoreBuffer = null
     if (this.context) void this.context.close()
     this.context = null
-  }
-
-  private async loadMusicBytes(): Promise<ArrayBuffer> {
-    const base = `${import.meta.env.BASE_URL}audio/music/`
-    const parts = await Promise.all(Array.from({ length: MUSIC_PART_COUNT }, async (_, index) => {
-      const name = index.toString().padStart(2, '0')
-      const response = await fetch(`${base}measured-in-pale-glass-${name}.txt`)
-      if (!response.ok) throw new Error(`Unable to load music part ${name}`)
-      return response.text()
-    }))
-
-    const encoded = parts.join('')
-    const binary = window.atob(encoded)
-    const bytes = new Uint8Array(binary.length)
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-    return bytes.buffer
-  }
-
-  private async ensureMusicBuffer(): Promise<void> {
-    const context = this.context
-    if (!context || this.musicBuffer) return
-
-    try {
-      const data = await this.musicDataPromise
-      if (context.state === 'closed' || this.musicBuffer) return
-      this.musicBuffer = await context.decodeAudioData(data.slice(0))
-    } catch {
-      // Gameplay audio remains available if the optional menu score cannot be loaded.
-    }
-  }
-
-  private startMusic(): void {
-    const context = this.context
-    const buffer = this.musicBuffer
-    const filter = this.musicFilter
-    if (!context || !buffer || !filter || this.musicSource || context.state === 'closed') return
-
-    const source = context.createBufferSource()
-    const offset = buffer.duration > 0 ? this.musicOffset % buffer.duration : 0
-    source.buffer = buffer
-    source.loop = true
-    source.connect(filter)
-    source.start(0, offset)
-    this.musicStartedAt = context.currentTime
-    this.musicSource = source
-  }
-
-  private stopMusic(rememberOffset = true): void {
-    const context = this.context
-    const source = this.musicSource
-    const buffer = this.musicBuffer
-    if (!source) return
-
-    if (rememberOffset && context && buffer && buffer.duration > 0) {
-      this.musicOffset = (this.musicOffset + Math.max(0, context.currentTime - this.musicStartedAt)) % buffer.duration
-    }
-    try {
-      source.stop()
-    } catch {
-      // The source may already have ended while the page was being torn down.
-    }
-    source.disconnect()
-    this.musicSource = null
   }
 
   private buildGraph(): void {
@@ -298,7 +229,7 @@ export class AudioDirector {
     musicSceneGain.gain.value = this.scene === 'menu' ? 1 : 0
     musicFilter.type = 'lowpass'
     musicFilter.frequency.value = 18000
-    musicFilter.Q.value = 0.4
+    musicFilter.Q.value = 0.42
     effectsGain.gain.value = this.settings.effects
     worldSceneGain.gain.value = 0
 
@@ -313,6 +244,7 @@ export class AudioDirector {
     this.effectsGain = effectsGain
     this.worldSceneGain = worldSceneGain
     this.noiseBuffer = this.createNoiseBuffer(context, 7)
+    this.menuScoreBuffer = this.createMenuScoreBuffer()
 
     this.riverGain = this.createLoopingNoise(worldSceneGain, 'lowpass', 1900, 0.72)
     this.windGain = this.createLoopingNoise(worldSceneGain, 'bandpass', 520, 0.55)
@@ -339,15 +271,135 @@ export class AudioDirector {
     this.applySettings(true)
   }
 
+  private createMenuScoreBuffer(): AudioBuffer {
+    const context = this.context
+    if (!context) throw new Error('Audio context is not ready')
+
+    const sampleRate = 22050
+    const duration = 28
+    const frames = sampleRate * duration
+    const buffer = context.createBuffer(2, frames, sampleRate)
+    const left = buffer.getChannelData(0)
+    const right = buffer.getChannelData(1)
+    const chords = [
+      [110, 164.81, 261.63],
+      [87.31, 130.81, 220],
+      [98, 146.83, 246.94],
+      [82.41, 123.47, 196],
+    ] as const
+    const piano = [
+      [1.6, 220],
+      [4.9, 261.63],
+      [8.7, 196],
+      [12.2, 164.81],
+      [16.8, 220],
+      [20.4, 293.66],
+      [23.6, 246.94],
+    ] as const
+
+    for (let frame = 0; frame < frames; frame += 1) {
+      const t = frame / sampleRate
+      const edge = Math.min(clamp01(t / 2.6), clamp01((duration - t) / 3.4))
+      const section = Math.min(chords.length - 1, Math.floor(t / 7))
+      const chord = chords[section] ?? chords[0]
+      let padL = 0
+      let padR = 0
+
+      for (let voice = 0; voice < chord.length; voice += 1) {
+        const frequency = chord[voice] ?? 110
+        const vibrato = Math.sin(TAU * (0.17 + voice * 0.035) * t + voice) * 0.0028
+        const phaseL = TAU * frequency * (1 + vibrato) * t
+        const phaseR = TAU * frequency * (1 - vibrato * 0.7) * t + voice * 0.19
+        const toneL = Math.sin(phaseL) + Math.sin(phaseL * 2.003) * 0.12 + Math.sin(phaseL * 3.01) * 0.035
+        const toneR = Math.sin(phaseR) + Math.sin(phaseR * 1.997) * 0.12 + Math.sin(phaseR * 3.005) * 0.035
+        const weight = voice === 0 ? 0.045 : voice === 1 ? 0.029 : 0.018
+        padL += toneL * weight
+        padR += toneR * weight
+      }
+
+      const breath = 0.72 + Math.sin(TAU * 0.033 * t) * 0.15 + Math.sin(TAU * 0.071 * t + 1.4) * 0.07
+      padL *= edge * breath
+      padR *= edge * (breath * 0.97 + 0.015)
+
+      let keysL = 0
+      let keysR = 0
+      for (let noteIndex = 0; noteIndex < piano.length; noteIndex += 1) {
+        const note = piano[noteIndex]
+        if (!note) continue
+        const [start, frequency] = note
+        const age = t - start
+        if (age < 0 || age > 5.2) continue
+        const attack = clamp01(age / 0.025)
+        const decay = Math.exp(-age * 0.72)
+        const envelope = attack * decay * edge
+        const body = Math.sin(TAU * frequency * age) * 0.068
+          + Math.sin(TAU * frequency * 2.01 * age + 0.16) * 0.026
+          + Math.sin(TAU * frequency * 3.98 * age) * 0.008
+        const pan = noteIndex % 2 === 0 ? 0.82 : 1.05
+        keysL += body * envelope * pan
+        keysR += body * envelope * (1.9 - pan)
+      }
+
+      const air = (Math.random() * 2 - 1) * 0.0015 * edge * (0.35 + breath * 0.4)
+      left[frame] = Math.tanh((padL + keysL + air) * 1.6) * 0.72
+      right[frame] = Math.tanh((padR + keysR - air * 0.5) * 1.6) * 0.72
+    }
+
+    this.applyTinyReverb(left, sampleRate, 0.19, 0.22)
+    this.applyTinyReverb(right, sampleRate, 0.23, 0.2)
+    return buffer
+  }
+
+  private applyTinyReverb(channel: Float32Array, sampleRate: number, seconds: number, feedback: number): void {
+    const delay = Math.max(1, Math.floor(sampleRate * seconds))
+    for (let index = delay; index < channel.length; index += 1) {
+      channel[index] += (channel[index - delay] ?? 0) * feedback
+    }
+  }
+
+  private startMenuScore(): void {
+    const context = this.context
+    const buffer = this.menuScoreBuffer
+    const filter = this.musicFilter
+    if (!context || !buffer || !filter || this.menuScoreSource || context.state === 'closed') return
+
+    const source = context.createBufferSource()
+    const offset = buffer.duration > 0 ? this.menuScoreOffset % buffer.duration : 0
+    source.buffer = buffer
+    source.loop = true
+    source.connect(filter)
+    source.start(0, offset)
+    this.menuScoreStartedAt = context.currentTime
+    this.menuScoreSource = source
+  }
+
+  private stopMenuScore(rememberOffset = true): void {
+    const context = this.context
+    const source = this.menuScoreSource
+    const buffer = this.menuScoreBuffer
+    if (!source) return
+
+    if (rememberOffset && context && buffer && buffer.duration > 0) {
+      this.menuScoreOffset = (this.menuScoreOffset + Math.max(0, context.currentTime - this.menuScoreStartedAt)) % buffer.duration
+    }
+    try {
+      source.stop()
+    } catch {
+      // Source can already be stopped during teardown.
+    }
+    source.disconnect()
+    this.menuScoreSource = null
+  }
+
   private createNoiseBuffer(context: AudioContext, seconds: number): AudioBuffer {
     const length = Math.floor(context.sampleRate * seconds)
     const buffer = context.createBuffer(1, length, context.sampleRate)
     const channel = buffer.getChannelData(0)
     let previous = 0
-    for (let i = 0; i < length; i += 1) {
+    for (let index = 0; index < length; index += 1) {
       const white = Math.random() * 2 - 1
       previous = previous * 0.985 + white * 0.015
-      channel[i] = white * 0.66 + previous * 1.7
+      channel[index] = white * 0.66 + previous * 1.7
     }
     return buffer
   }
