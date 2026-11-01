@@ -3,8 +3,6 @@ import {
   WORLD_LIMIT,
   createWorldLandmarks,
   isInsideRiver,
-  riverCenterZ,
-  riverSignedDistance,
   terrainHeightAt,
   zoneAt,
   type WorldLandmark,
