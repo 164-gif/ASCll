@@ -1,14 +1,17 @@
 import type { WorldState } from '../../simulation/WorldState'
-import {
-  WORLD_BRIDGES,
-  WORLD_FIRES,
-  WORLD_LIMIT,
-  WORLD_ROADS,
-  WORLD_ZONES,
-  RIVER_HALF_WIDTH,
-  riverCenterZ,
-  terrainHeightAt,
-} from '../../world/WorldLayout'
+import { WORLD_LIMIT } from '../../world/WorldLayout'
+
+const MAP_COLS = 72
+const MAP_ROWS = 72
+const MAP_GLYPHS = ' .,:;+=x*#%@'
+const MAP_PALETTE = [
+  '#08110f', '#10201c', '#1c3529', '#365a3b', '#3e5663',
+  '#7f8b83', '#8d5b21', '#d28a25', '#f0c45a', '#d7d2bb',
+] as const
+
+// Compact glyph/palette sampling of the generated four-segment map artwork.
+// Each byte stores palette index in the high nibble and glyph index in the low nibble.
+const MAP_DATA = 'AAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAREQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEQAAACEhEREREREREREREREREREREREREREREREREREREREiEQAzYwARIiERERERERERERERERERERERERERERERERERERERISEAAREAAAAAEREiEQAREREAAAAAABERAAAAABERABEREQAAAAARIQAAAAAAAAAAAAAAAQARAQAAABEAAAEiISIRESIRAAAAABEAEQEAIiIjIhERISIiESIRAAAREQAREQAAIjMiESIiESIiAAAAAAEAAAAREQAAESIRERERAAAAIiEBETMiERERIiEiIgARAAEREQARIhERIiIiIRERABERAAAAABEREQAiIxEiMyIRIiIiIgAAAAABIgAAAAARQyIRIjMiEQARIhERESIBIjMiIhERIhEREREREREAABERESIiIiIiIgAREREREQABEQEhIiIiEREiIhERAQAAABEiIiIiAQABIkMREREREREhIhERAAAiIhEiIxEiEREREREREREAIiIiMxERIjMiIgAhEQAAABEREQAAIhERIiIiIQARIgAAACIiIiEiIgABESIiABEiIhEiIhERESIzESIhIiEiIhERAREREREiIREhMyEhIiIRAAAiEQAREREhESERACIzETMiIgARIhEAABEhIiIiIgARERFDQyEiEQEiIhERERERESIiIiIiEREiEREREREiEREiQxEAAAAAACEjMwAAABERAAARABERASIiIgAiEREAETMiIhEiIxEiIiIiQxEAEREhEREREQARIiIiMxEAESIRABEREREAAAAiIyIiABERIiIzQzMiEQAAAQAAAAARIiIzEQERERERABERIiIiESIzMyEhQ0MiEREiIiEREQARIhEiIhEAEREREREREQAAIhEiMxEiESEiIjNkZGRkIgAAESIAAAAAERFEEREiIRERABEAIhERARERIhEREUNEIhEREQERIREAAAEzIwARESIiEREREQARIiIzIhEAIiJDQzMzIjNjIiIAEREjIhERIRFDERERERERABEAIgEAEREAEQARQ0MiIREREREREREAIREiIgARIiIRABEREQEAASEzERERIiIiIiJjESJkYxEAEQAiZCIiEQAiAAARERERAQAAIxERIiIREREiIhERIhEhAREAABEiIhEiIgERIhERERERERERERFEImMREREhImQzEQARIjMiEREREREREQERIiMiERERERERIhERIkMiIiIRIiIhERERIhEiIhEREREiIhERISIRABERERERESIzZHYiEREiM2QiIhERIWMiASJlEQABEREREQABEREREREREREiABERESIRESIiIhEBABEiEREAADNlMyIRIiIhEREREREAESEiIWMRIiIRESEiIiIiESIiESJjIhERESIiIREREQAAAAAREREiERERISEiEREiERERESEAIRERIhEhMyIiIiIREREREQERIiIhERERM2RlIhEiZCIiImVkIiIiESIRIjMiIiIiEQAAAAARERERESIiIiIzYxERESIRIiIiIiIjYzMzMyIiEQERABERERERESIREREiM2RkMxERIiJjZIl2YyIRMyIAIhEREQARIRERERERERERERERESFjZTMzIiIiMzNkZGRkZGNmZWMiIhEREQARERERESIiEREhITMiIiIiImNjZGVlZGMiIhEREREhEREREREREREiIiIiIjMzMyIiImNjZGRlZWNjYyIiIhEhM2NjIiIRABERERERERERERERERERESEiI2RjY2NjY2MiERERERERESERIiIiIiIiIiIiIiIiM2RkZGV2ZTNjIhERAREiABEiMyEiIxERERERERERESIiERERERERIjMiIiIzY2RjMxERERERIiMzIiIiIiIiIREREREAERERISIiM2MzESERESIRAAAiESEiIiIRIiIREREREREREREREREiEQAiIxEBEREAESIiIREiIiIhMyIiEREREREAEREAIiIAAREiMzMiIiIhIiIRESIAESIhERERIiEBIiIRAREREQAAEQAAACIiIgAAABEiEREAESERESEiMyIiERERESIRAREiEQARISIRABERISIiIhERIiIREREAImQiEREiISERISIRABEREREAEQAAERERIhEAESIzMzMiERERIhEiIiIREREREQEAIjQzIyIRESERACIiAAABESIzEQARESIiEWMiESIiIiIRISIRERERERERERERERERIiIBAAAAESIiAREREREiIRERERERARERMyEiISIhERERITMiMxEAESIiIiEREREiESIRAREhIiIRIiIREREREREiEQARISERESIiEREREQAAERERIjMiEREiIiIRADMzESEhEREhIiIRIiIRIiIREQAREREiRCEiIhERISIiIhEiIhEiEREREREAEREhEQERERERERERERERIREiMyIRABEhERERMzMiIhEiEQAhERERESIiIREREQARESJDIiIiEREhIiIRESIiESIiEREREREAESERESIRESIREREhERERESIzEQAiQ0MiEQARIiIRIhEiERERERERIiIiIjMRIhERISIREREAESIiIiIiIjMRM0MiEREREREAEREAEQAAEREiIhERERERETMiESJEQyIREQAAABEiIhEzEREhIhEREQAiIREhIiIiIiIRAREiIjMiIiIRIxERIhEiEQEREQERIiIRAREiIhEAABEiIQERIiIRESIiIhEBESIiEQAAEREzESEiEQERIgEjIgERIiIjIhEhIiIRESEiIhEiIhERESIiEREREREREREhESERABEiIREAETMiIiIRERERABEiMzMiIhERIhEzEREAEREBEQAiIiIhESIhISIiIiIiIiIhEREiESIREREREQEREREREREiEQAAAAAAERERERERIiMREREAEUMiEREAABEAAREjEREiIhEiIhEiEREiIiIiERERIiIiIgEhESIiESIREQAiEREREREREREREQARAQAAABEhERERETMiEREREREAEQAAAAARIgAiERERERERERERESEiQzMiIREiEREiIhEREREiEREBACEiEREREREREREREQARABEiMzMhAREREREzIREiEREAACIiEREiIhERABERABEREREAESIRERERIiIiIhERESNEIgAjEQAhEREhAREREREAERERIiIRABERISIREQAREREiIxERERERIjMzIyIhEREAESIhEREAAAAhIhEiAAAAERERIhEAITNDQxEiASIzMyERAREREREAEREAABEREQAAAAARIhERESERIiIRIhEiIhERESIRERERAREiIhEAABEiEREREQARIiIRASIiIiMRQxERESIiESIiABEREQARIiIiIQAAERERAAARAAERERERMxERIhERMyIiIhEhERERAAARIiIiERERERERESERAAARACJEQyMiMxEAETMiIiIiEREREQEiEREiMyIRAAARIiIhABEiEREiIhERIhERIhEiESIiERERABEiIiEiERERABERIjMiEREiEUMiQ0MiISIRIgAAMyIRIhERERERIjMiEREAEQEAAAAAABEREREzIhEhIhEAAAAiEQAAEREAIjMiIgAAERERIjMzMxEiIgARMyIzIzMzIhEiQyIAIhERABEREREiIiIiMzMRERERERERERERESIiEREREREREQAiIhEREQAREREiIiEzIhERMyIiIiIiASIiMzMiQzMiIiIiETMiIiIRABERERERESIhIiIiAAERAAAiIgARESMiEREREQEAIkNDQyIAEREAAAARIiIiIhEAABERACIhAEQiMyIiIiIzQyIhESIRESEAABEREREAEUMiIiIBEQAAESIiIiIRESIiERERESEiQxEiERERIiIRAREiEQAAEQAAADMzIhEREUQiIiIzIiIzQyIiMzMzIhEiIhEREQERITMiEREAABEzQyIhIiIiESEiERERIiIzRCIBERERIiERABEREREAABEhESMiRCIiIkQzITM0ZDQzQyJDIiIRESMzIhEREQERIUMRESIiM0QjEQAiImVlEREiIhERIhEiIiIiEQEiIhERERERIhERESIiESIzESIiIjQRMzQzIiI0IiJDIiIRIiMiIhEREREAADMAESIRQzMAESIiIiJjEREiIhERERERESIiIiIiEREiEQEBERERESJkESIzACIhEWQjZDMiABEzMyEzIxERQxEiIhEREREhITMAESIiMzMAESIiIhEREREiIhEhIhEREQARAQEAERERERERIiIRESJkESIzACIiM2RjM2MRImQzZCI0IhERIhEjIhERERERIkMAESIiIhEiIiIiIiIiIiEzIhEiESIiEREiESEiIiEREQAREREREREiIiIiIiIiM3Z2ZDMRImMiZGQjIRERIiJDABEREQAAISIRIiIiESIiMyIRIiMiIjMiESIRIjMzIgEBESIiEQARIREAAAARERERESIiIiIiM3Z2ZGMREREhd3ZjIgARIiMzABEREQERIhEiIjMiESJkZWRjZGMiYyIREREiIhEiMyIAEQAAABEAERERIhEhIiIRM2QRIiIRImQzZGMhIiJjdnZkIiIzESIzIQERERERIhERESIiESIiY2QiEREzIhEzIhERImNkEQARIhEhACEAABERIhERESIzZGUiIiIiIjMiImNlZWVkZDMzIjMzIxEiERERERERESIRERERISIiIjMiIiIzISIRISIjI2V2IhEAESIiERERIyIREREiIiIiImMiIzMzIiIiIjRkZDMzQxEiZBERIhEiERERERERESIRESNDESIiIhEiIiIzESEiISIjM2RjIiIREREREREiERERERERESERImMiMyMiIjMzZGRkMzMzIiIzMyIRMxEiERERERERESIiIiIhMyIRIiIiESEjIhEiIiJDQyIzIiIiIhEAIhEAABEREQERESIiIiIiIjMiMzNkZGRkYzMiIjMRIiIiMyIiEREREREAEREREQARIiIRIiIiIREiMyIRIiIhESEhIiIiEREREREiIiIiIiIiIiIRESEiIiEiM2RkZDMzRCIjMyIiMyIiIiIiERERERERIiIiIiERESIiEQAAEQARETMiESIRESERIRERERERIiMiEREhIiIiM2QzIiMiMzMzZDMiIiIzRBEzMyIzESIiIiIRABEREREAABERIiERERERIhERESIiEREiIiIiIhERIhEiIiIiIhERIiIhESIRESJlZDMzIiIzIiIiMzMiQxEiIhEBAREAESIiERERERERIhEREREBEREAERERESIiIgARISIiIiMjIiIiIiERERERIiIRABERMyJkIhEiIiIiISMzIiIzQxEAITMjIgAiIiIBABERERERERERIiIRESIiEREREREREREREREREREREREAESERIiIREQABIiIzMzNjIjMiERERIREhESIREREAMyIzMyIRABEREQEREREAEREiAAAAABERAQAhIiIiIiIREREREREiEQAiMzMiIiERESIiQyJEZWVlMzMRESIzIhEBESIREREiMzMiESMiEREREREREREREREhIhEiMxERIiIRESIiIhEREREREQAAACIzIhEiIhEREREiIiJkZGQiIRERASIhERERIiIiERERIiIiIhERAAAAABEREREAERERITMiIiIiIjMzEQARESIiERERESIiERERABEiERERESEiEUMiMyIRABEhIxEREREhIhEREQEiMyIiIhEjIgERAQAREQEAERERACIzIiIiEREhESIhESEiERERESIjMzMzIREhIRERERERIyIiIiEAESIiIREAESEiIhERIREiIhEiIiIiIREAABERERERERERIhEiIhERIhERESIzIiIhEREhERERISIzMyIiEREREREiIhERERERESIiIiIjIhEhEREREREAAAAiIwAREQARIhEREREAABERERERESIiEREiMyIRESIiEREiERERIhEBEREiERERESEiACIhARERMzMzIhEiQxERIREAERERIREiIhEiIhEiEREREREAESIiMyIRIgAhIiIiIiIREQAAABEiIiIhEREAACERERERARERESIiEQARESEREREiREMiERERESIhIhEhIhEhEREREREREQEBERERIiIRESIiERERAAARIiIBERERESEzQyMREREiIREhERERISERIgEREQEBIiIRESIiISIREREiEREiEREiIyIRABEREQEAAAAAERERESIRIREREREREREiMyIRASIjIhERERERAAAAEREAEREREREREREREQAAESIiISIiIREiIhERESEREREAAAEREREAAAAAAAAAAAARIREAARERABEREREBERERAAAAEREAEREBAAERABEBERERABEBERERIhEREREhIkMRABERERERAAAAABERACEREREREREREREREREREQAAAAAAAREhEQEBAAABAQAAAAABAREBEQEBERERAQAAEQABAAAAAAAAESIREREREQEREREBESEAABEREREBAQEBAAERAREBASEiIQAAACJkEQAAETMAAAAiIiIAAAAzIgAAADMRAAAiYyEAAAAiIiIRAAAAAQEBAQEBAQEREREAAAAAAAAAAAAAAAAAAAAAABEREQAAACIjEQAAETMRAAARABERABEiEQEAADMRAAAiIiIAAAEREREAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAERAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 
 export class WorldMap {
   readonly element: HTMLElement
@@ -18,11 +21,14 @@ export class WorldMap {
   private readonly openButton: HTMLButtonElement
   private readonly closeButton: HTMLButtonElement
   private readonly onOpenChange: (open: boolean) => void
+  private readonly mapBytes: Uint8Array
   private open = false
   private staticLayer: HTMLCanvasElement | null = null
 
   constructor(parent: HTMLElement, world: WorldState, onOpenChange: (open: boolean) => void) {
     this.onOpenChange = onOpenChange
+    const decoded = atob(MAP_DATA)
+    this.mapBytes = Uint8Array.from(decoded, (char) => char.charCodeAt(0))
 
     this.openButton = document.createElement('button')
     this.openButton.className = 'world-map-button'
@@ -38,21 +44,19 @@ export class WorldMap {
       <div class="world-map__frame">
         <header class="world-map__header">
           <div>
-            <span class="world-map__eyebrow">карта мира</span>
+            <span class="world-map__eyebrow">карта мира · 4 сегмента</span>
             <strong>the drowned valley</strong>
           </div>
           <button class="world-map__close" type="button" aria-label="Закрыть карту">M / ESC</button>
         </header>
-        <canvas class="world-map__canvas" aria-label="Карта игрового мира"></canvas>
+        <canvas class="world-map__canvas" aria-label="Четырёхсегментная карта игрового мира"></canvas>
         <footer class="world-map__legend">
           <span><i class="world-map__dot world-map__dot--player"></i>ты</span>
           <span><i class="world-map__dot world-map__dot--enemy"></i>враг</span>
-          <span>━ дорога</span>
-          <span>═ мост</span>
-          <span>▲ монолит</span>
-          <span>□ руины</span>
-          <span>▣ башня</span>
-          <span>· лес</span>
+          <span>◰ лагерь</span>
+          <span>═ переправа</span>
+          <span>⌂ убежище</span>
+          <span>▣ руины</span>
         </footer>
       </div>
     `
@@ -87,8 +91,7 @@ export class WorldMap {
   }
 
   update(world: WorldState): void {
-    if (!this.open) return
-    this.draw(world)
+    if (this.open) this.draw(world)
   }
 
   destroy(): void {
@@ -120,7 +123,7 @@ export class WorldMap {
   }
 
   private resize(): void {
-    const size = Math.min(860, Math.max(420, Math.floor(Math.min(window.innerWidth * 0.86, window.innerHeight * 0.76))))
+    const size = Math.min(900, Math.max(420, Math.floor(Math.min(window.innerWidth * 0.9, window.innerHeight * 0.8))))
     const ratio = Math.min(window.devicePixelRatio || 1, 2)
     this.canvas.width = Math.floor(size * ratio)
     this.canvas.height = Math.floor(size * ratio)
@@ -130,185 +133,132 @@ export class WorldMap {
     this.staticLayer = null
   }
 
+  private mapX(x: number, size: number): number {
+    // East is deliberately on the left so the forest/camp quadrant matches the illustrated atlas.
+    return ((WORLD_LIMIT - x) / (WORLD_LIMIT * 2)) * size
+  }
+
+  private mapY(z: number, size: number): number {
+    return size - ((z + WORLD_LIMIT) / (WORLD_LIMIT * 2)) * size
+  }
+
   private draw(world: WorldState): void {
-    const cssSize = this.canvas.clientWidth
-    if (cssSize <= 0) return
+    const size = this.canvas.clientWidth
+    if (size <= 0) return
+    if (!this.staticLayer) this.staticLayer = this.buildStaticLayer(size)
 
-    if (!this.staticLayer) this.staticLayer = this.buildStaticLayer(cssSize, world)
-    this.ctx.clearRect(0, 0, cssSize, cssSize)
-    this.ctx.drawImage(this.staticLayer, 0, 0, cssSize, cssSize)
+    this.ctx.clearRect(0, 0, size, size)
+    this.ctx.drawImage(this.staticLayer, 0, 0, size, size)
 
-    const map = (value: number): number => ((value + WORLD_LIMIT) / (WORLD_LIMIT * 2)) * cssSize
-    const px = map(world.player.x)
-    const py = cssSize - map(world.player.z)
+    const px = this.mapX(world.player.x, size)
+    const py = this.mapY(world.player.z, size)
 
+    const segmentLeft = px < size * 0.5 ? 0 : size * 0.5
+    const segmentTop = py < size * 0.5 ? 0 : size * 0.5
     this.ctx.save()
-    this.ctx.translate(px, py)
-    this.ctx.rotate(-world.player.facing)
-    this.ctx.beginPath()
-    this.ctx.moveTo(0, -8)
-    this.ctx.lineTo(5.5, 6)
-    this.ctx.lineTo(0, 3.5)
-    this.ctx.lineTo(-5.5, 6)
-    this.ctx.closePath()
-    this.ctx.fillStyle = '#eef5ef'
-    this.ctx.shadowColor = 'rgba(220,255,230,.55)'
-    this.ctx.shadowBlur = 9
-    this.ctx.fill()
+    this.ctx.fillStyle = 'rgba(232,181,63,.035)'
+    this.ctx.strokeStyle = 'rgba(235,184,67,.25)'
+    this.ctx.lineWidth = 1.2
+    this.ctx.fillRect(segmentLeft, segmentTop, size * 0.5, size * 0.5)
+    this.ctx.strokeRect(segmentLeft + 1, segmentTop + 1, size * 0.5 - 2, size * 0.5 - 2)
     this.ctx.restore()
 
-    this.ctx.shadowBlur = 0
     for (const enemy of world.enemies) {
-      const ex = map(enemy.x)
-      const ey = cssSize - map(enemy.z)
+      const ex = this.mapX(enemy.x, size)
+      const ey = this.mapY(enemy.z, size)
       this.ctx.beginPath()
-      this.ctx.arc(ex, ey, 2.4, 0, Math.PI * 2)
-      this.ctx.fillStyle = 'rgba(188,72,78,.8)'
+      this.ctx.arc(ex, ey, Math.max(1.6, size * 0.0028), 0, Math.PI * 2)
+      this.ctx.fillStyle = 'rgba(191,74,79,.78)'
+      this.ctx.shadowColor = 'rgba(191,52,58,.4)'
+      this.ctx.shadowBlur = 4
       this.ctx.fill()
     }
 
-    this.ctx.font = '11px ui-monospace, monospace'
-    this.ctx.fillStyle = 'rgba(235,240,236,.72)'
+    this.ctx.shadowBlur = 0
+    this.ctx.save()
+    this.ctx.translate(px, py)
+    this.ctx.rotate(-world.player.facing)
+    this.ctx.shadowColor = 'rgba(255,196,65,.95)'
+    this.ctx.shadowBlur = Math.max(8, size * 0.016)
+    this.ctx.fillStyle = '#ffd86b'
+    this.ctx.strokeStyle = '#fff0b2'
+    this.ctx.lineWidth = Math.max(1, size * 0.0017)
+    this.ctx.beginPath()
+    this.ctx.moveTo(0, -Math.max(7, size * 0.011))
+    this.ctx.lineTo(Math.max(5, size * 0.007), Math.max(6, size * 0.009))
+    this.ctx.lineTo(0, Math.max(3, size * 0.004))
+    this.ctx.lineTo(-Math.max(5, size * 0.007), Math.max(6, size * 0.009))
+    this.ctx.closePath()
+    this.ctx.fill()
+    this.ctx.stroke()
+    this.ctx.restore()
+
+    this.ctx.shadowBlur = 0
+    this.ctx.fillStyle = 'rgba(235,224,190,.78)'
+    this.ctx.font = `${Math.max(10, Math.floor(size * 0.014))}px ui-monospace, monospace`
     this.ctx.textAlign = 'left'
-    this.ctx.fillText(`${world.currentZone.name} · ${world.player.x.toFixed(0)}, ${world.player.z.toFixed(0)}`, 14, cssSize - 14)
+    this.ctx.fillText(`${this.segmentName(world.player.x, world.player.z)} · ${world.player.x.toFixed(0)}, ${world.player.z.toFixed(0)}`, 15, size - 15)
   }
 
-  private buildStaticLayer(size: number, world: WorldState): HTMLCanvasElement {
+  private segmentName(x: number, z: number): string {
+    if (x >= 0 && z >= 0) return 'лесной лагерь'
+    if (x < 0 && z >= 0) return 'северная переправа'
+    if (x >= 0 && z < 0) return 'нижний лесной тракт'
+    return 'руины у ручья'
+  }
+
+  private buildStaticLayer(size: number): HTMLCanvasElement {
     const layer = document.createElement('canvas')
     layer.width = size
     layer.height = size
     const ctx = layer.getContext('2d')
     if (!ctx) return layer
 
-    const map = (value: number): number => ((value + WORLD_LIMIT) / (WORLD_LIMIT * 2)) * size
-    const steps = 92
-    const cell = size / steps
-
-    ctx.fillStyle = '#070b08'
+    ctx.fillStyle = '#050908'
     ctx.fillRect(0, 0, size, size)
 
-    for (let gy = 0; gy < steps; gy += 1) {
-      for (let gx = 0; gx < steps; gx += 1) {
-        const x = -WORLD_LIMIT + ((gx + 0.5) / steps) * WORLD_LIMIT * 2
-        const z = -WORLD_LIMIT + ((gy + 0.5) / steps) * WORLD_LIMIT * 2
-        const h = terrainHeightAt(x, z)
-        const t = Math.max(0, Math.min(1, (h + 0.7) / 5.1))
-        const base = 14 + Math.round(t * 24)
-        ctx.fillStyle = `rgb(${base - 3},${base + 7},${base})`
-        ctx.fillRect(gx * cell, size - (gy + 1) * cell, Math.ceil(cell + 1), Math.ceil(cell + 1))
+    const cellW = size / MAP_COLS
+    const cellH = size / MAP_ROWS
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = `${Math.ceil(cellH * 1.2)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+
+    for (let row = 0; row < MAP_ROWS; row += 1) {
+      for (let col = 0; col < MAP_COLS; col += 1) {
+        const packed = this.mapBytes[row * MAP_COLS + col] ?? 0
+        const paletteIndex = Math.min(MAP_PALETTE.length - 1, packed >> 4)
+        const glyphIndex = Math.min(MAP_GLYPHS.length - 1, packed & 0x0f)
+        const glyph = MAP_GLYPHS[glyphIndex] ?? ' '
+        if (glyph === ' ') continue
+        ctx.fillStyle = MAP_PALETTE[paletteIndex] ?? MAP_PALETTE[0]
+        ctx.fillText(glyph, (col + 0.5) * cellW, (row + 0.5) * cellH)
       }
     }
 
-    const riverPath = new Path2D()
-    let first = true
-    for (let x = -WORLD_LIMIT - 8; x <= WORLD_LIMIT + 8; x += 1.25) {
-      const z = riverCenterZ(x)
-      const sx = map(x)
-      const sy = size - map(z)
-      if (first) {
-        riverPath.moveTo(sx, sy)
-        first = false
-      } else riverPath.lineTo(sx, sy)
-    }
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    ctx.lineWidth = Math.max(7, (RIVER_HALF_WIDTH * 2 / (WORLD_LIMIT * 2)) * size)
-    ctx.strokeStyle = 'rgba(44,70,79,.72)'
-    ctx.stroke(riverPath)
-    ctx.lineWidth = Math.max(1.5, size * 0.003)
-    ctx.strokeStyle = 'rgba(133,170,181,.56)'
-    ctx.stroke(riverPath)
+    const vignette = ctx.createRadialGradient(size * 0.5, size * 0.47, size * 0.24, size * 0.5, size * 0.5, size * 0.72)
+    vignette.addColorStop(0, 'rgba(0,0,0,0)')
+    vignette.addColorStop(1, 'rgba(0,4,3,.47)')
+    ctx.fillStyle = vignette
+    ctx.fillRect(0, 0, size, size)
 
-    for (const road of WORLD_ROADS) {
-      ctx.beginPath()
-      road.points.forEach((point, index) => {
-        const x = map(point[0])
-        const y = size - map(point[1])
-        if (index === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
-      })
-      ctx.lineWidth = Math.max(2, (road.width / (WORLD_LIMIT * 2)) * size)
-      ctx.strokeStyle = 'rgba(178,157,119,.62)'
-      ctx.stroke()
-      ctx.lineWidth = Math.max(0.8, ctx.lineWidth * 0.24)
-      ctx.strokeStyle = 'rgba(231,216,180,.35)'
-      ctx.stroke()
-    }
-
-    for (const bridge of WORLD_BRIDGES) {
-      const x = map(bridge.x)
-      const y = size - map(bridge.z)
-      const scale = size / (WORLD_LIMIT * 2)
-      ctx.save()
-      ctx.translate(x, y)
-      ctx.rotate(-bridge.rotation)
-      ctx.fillStyle = bridge.style === 'stone' ? 'rgba(218,211,190,.9)' : 'rgba(166,116,73,.88)'
-      ctx.fillRect(-bridge.width * scale * 0.5, -bridge.length * scale * 0.5, bridge.width * scale, bridge.length * scale)
-      ctx.restore()
-    }
-
-    ctx.lineWidth = Math.max(1, size * 0.002)
-    for (const zone of WORLD_ZONES) {
-      const zx = map(zone.x)
-      const zy = size - map(zone.z)
-      const zr = (zone.radius / (WORLD_LIMIT * 2)) * size
-      ctx.beginPath()
-      ctx.arc(zx, zy, zr, 0, Math.PI * 2)
-      ctx.strokeStyle = 'rgba(188,204,193,.1)'
-      ctx.setLineDash([4, 6])
-      ctx.stroke()
-      ctx.setLineDash([])
-      ctx.fillStyle = 'rgba(219,228,221,.5)'
-      ctx.font = `${Math.max(9, Math.floor(size * 0.015))}px ui-monospace, monospace`
-      ctx.textAlign = 'center'
-      ctx.fillText(zone.name, zx, zy - zr - 5)
-    }
-
-    for (const landmark of world.trees) {
-      const x = map(landmark.x)
-      const y = size - map(landmark.z)
-      if (landmark.kind === 'tree') {
-        ctx.fillStyle = 'rgba(104,142,109,.58)'
-        ctx.fillRect(x, y, 1.5, 1.5)
-      } else if (landmark.kind === 'ruin' || landmark.kind === 'gate') {
-        ctx.strokeStyle = 'rgba(202,193,174,.74)'
-        ctx.strokeRect(x - 2.5, y - 2.5, 5, 5)
-      } else if (landmark.kind === 'tower') {
-        ctx.fillStyle = 'rgba(204,199,184,.78)'
-        ctx.fillRect(x - 2.8, y - 2.8, 5.6, 5.6)
-        ctx.strokeStyle = 'rgba(238,232,214,.6)'
-        ctx.strokeRect(x - 3.5, y - 3.5, 7, 7)
-      } else if (landmark.kind === 'monolith') {
-        ctx.fillStyle = 'rgba(218,215,199,.82)'
-        ctx.beginPath()
-        ctx.moveTo(x, y - 4)
-        ctx.lineTo(x + 3.5, y + 3)
-        ctx.lineTo(x - 3.5, y + 3)
-        ctx.closePath()
-        ctx.fill()
-      } else {
-        ctx.fillStyle = 'rgba(148,153,145,.54)'
-        ctx.beginPath()
-        ctx.arc(x, y, Math.min(2.5, 0.8 + landmark.radius * 0.45), 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-
-    for (const fire of WORLD_FIRES) {
-      const x = map(fire.x)
-      const y = size - map(fire.z)
-      ctx.beginPath()
-      ctx.arc(x, y, 2.1, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(230,150,55,.9)'
-      ctx.shadowColor = 'rgba(235,137,42,.6)'
-      ctx.shadowBlur = 7
-      ctx.fill()
-    }
-    ctx.shadowBlur = 0
-
-    ctx.strokeStyle = 'rgba(224,233,226,.22)'
+    ctx.save()
+    ctx.strokeStyle = 'rgba(217,151,43,.32)'
     ctx.lineWidth = 1
-    ctx.strokeRect(0.5, 0.5, size - 1, size - 1)
+    ctx.setLineDash([Math.max(3, size * 0.004), Math.max(8, size * 0.012)])
+    ctx.beginPath()
+    ctx.moveTo(size * 0.5, 8)
+    ctx.lineTo(size * 0.5, size - 8)
+    ctx.moveTo(8, size * 0.5)
+    ctx.lineTo(size - 8, size * 0.5)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    ctx.strokeStyle = 'rgba(221,158,48,.58)'
+    ctx.lineWidth = Math.max(1, size * 0.0016)
+    ctx.strokeRect(4.5, 4.5, size - 9, size - 9)
+    ctx.strokeStyle = 'rgba(221,158,48,.18)'
+    ctx.strokeRect(9.5, 9.5, size - 19, size - 19)
+    ctx.restore()
 
     return layer
   }
