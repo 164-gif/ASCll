@@ -6,11 +6,16 @@ type AudioScene = 'menu' | 'world'
 type Surface = 'grass' | 'water' | 'stone'
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
+const MUSIC_PART_COUNT = 13
 
 export class AudioDirector {
   private readonly store = new AudioSettings()
   private settings: AudioSettingsState = this.store.get()
-  private readonly menuTrack = new Audio()
+  private musicDataPromise: Promise<ArrayBuffer>
+  private musicBuffer: AudioBuffer | null = null
+  private musicSource: AudioBufferSourceNode | null = null
+  private musicStartedAt = 0
+  private musicOffset = 0
 
   private context: AudioContext | null = null
   private masterGain: GainNode | null = null
@@ -46,9 +51,7 @@ export class AudioDirector {
   }
 
   constructor() {
-    this.menuTrack.preload = 'auto'
-    this.menuTrack.loop = true
-    this.menuTrack.src = `${import.meta.env.BASE_URL}audio/measured-in-pale-glass.mp3`
+    this.musicDataPromise = this.loadMusicBytes()
 
     window.addEventListener('ascii:audio-settings', this.handleSettings)
     document.addEventListener('visibilitychange', this.handleVisibility)
@@ -60,9 +63,10 @@ export class AudioDirector {
     if (!context) return
 
     const resume = context.state === 'suspended' ? context.resume() : Promise.resolve()
-    if (this.scene === 'menu' && this.menuTrack.paused) void this.menuTrack.play().catch(() => undefined)
     await resume
     this.applySettings(true)
+    await this.ensureMusicBuffer()
+    if (this.scene === 'menu') this.startMusic()
   }
 
   entryConfirm(): void {
@@ -125,7 +129,7 @@ export class AudioDirector {
     this.musicSceneGain.gain.setTargetAtTime(0, now, 0.2)
     this.musicFilter.frequency.setTargetAtTime(18000, now, 0.25)
     window.setTimeout(() => {
-      if (this.scene === 'world') this.menuTrack.pause()
+      if (this.scene === 'world') this.stopMusic()
     }, 900)
   }
 
@@ -134,8 +138,9 @@ export class AudioDirector {
     const context = this.context
     if (!context || !this.worldSceneGain || !this.musicSceneGain || !this.musicFilter) return
 
-    if (this.menuTrack.currentTime > 164) this.menuTrack.currentTime = 0
-    if (this.menuTrack.paused) void this.menuTrack.play().catch(() => undefined)
+    void this.ensureMusicBuffer().then(() => {
+      if (this.scene === 'menu') this.startMusic()
+    })
 
     const now = context.currentTime
     this.worldSceneGain.gain.cancelScheduledValues(now)
@@ -208,11 +213,73 @@ export class AudioDirector {
   destroy(): void {
     window.removeEventListener('ascii:audio-settings', this.handleSettings)
     document.removeEventListener('visibilitychange', this.handleVisibility)
-    this.menuTrack.pause()
-    this.menuTrack.removeAttribute('src')
-    this.menuTrack.load()
+    this.stopMusic(false)
+    this.musicBuffer = null
     if (this.context) void this.context.close()
     this.context = null
+  }
+
+  private async loadMusicBytes(): Promise<ArrayBuffer> {
+    const base = `${import.meta.env.BASE_URL}audio/music/`
+    const parts = await Promise.all(Array.from({ length: MUSIC_PART_COUNT }, async (_, index) => {
+      const name = index.toString().padStart(2, '0')
+      const response = await fetch(`${base}measured-in-pale-glass-${name}.txt`)
+      if (!response.ok) throw new Error(`Unable to load music part ${name}`)
+      return response.text()
+    }))
+
+    const encoded = parts.join('')
+    const binary = window.atob(encoded)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+    return bytes.buffer
+  }
+
+  private async ensureMusicBuffer(): Promise<void> {
+    const context = this.context
+    if (!context || this.musicBuffer) return
+
+    try {
+      const data = await this.musicDataPromise
+      if (context.state === 'closed' || this.musicBuffer) return
+      this.musicBuffer = await context.decodeAudioData(data.slice(0))
+    } catch {
+      // Gameplay audio remains available if the optional menu score cannot be loaded.
+    }
+  }
+
+  private startMusic(): void {
+    const context = this.context
+    const buffer = this.musicBuffer
+    const filter = this.musicFilter
+    if (!context || !buffer || !filter || this.musicSource || context.state === 'closed') return
+
+    const source = context.createBufferSource()
+    const offset = buffer.duration > 0 ? this.musicOffset % buffer.duration : 0
+    source.buffer = buffer
+    source.loop = true
+    source.connect(filter)
+    source.start(0, offset)
+    this.musicStartedAt = context.currentTime
+    this.musicSource = source
+  }
+
+  private stopMusic(rememberOffset = true): void {
+    const context = this.context
+    const source = this.musicSource
+    const buffer = this.musicBuffer
+    if (!source) return
+
+    if (rememberOffset && context && buffer && buffer.duration > 0) {
+      this.musicOffset = (this.musicOffset + Math.max(0, context.currentTime - this.musicStartedAt)) % buffer.duration
+    }
+    try {
+      source.stop()
+    } catch {
+      // The source may already have ended while the page was being torn down.
+    }
+    source.disconnect()
+    this.musicSource = null
   }
 
   private buildGraph(): void {
@@ -235,8 +302,7 @@ export class AudioDirector {
     effectsGain.gain.value = this.settings.effects
     worldSceneGain.gain.value = 0
 
-    const media = context.createMediaElementSource(this.menuTrack)
-    media.connect(musicFilter).connect(musicSceneGain).connect(musicGain).connect(masterGain)
+    musicFilter.connect(musicSceneGain).connect(musicGain).connect(masterGain)
     worldSceneGain.connect(effectsGain).connect(masterGain)
     masterGain.connect(context.destination)
 
