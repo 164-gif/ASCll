@@ -29,12 +29,25 @@ export type PlayerState = {
 const WORLD_LIMIT = 24
 const PLAYER_RADIUS = 0.42
 const TREE_CLEARANCE = 0.08
+const RIVER_HALF_WIDTH = 6.8
+
+export function riverCenterZ(x: number): number {
+  return -x * 0.58 - 5.5 + Math.sin(x * 0.11) * 1.65 + Math.cos(x * 0.05) * 1.1
+}
+
+export function riverSignedDistance(x: number, z: number): number {
+  return (z - riverCenterZ(x)) * 0.86
+}
+
+export function isInsideRiver(x: number, z: number): boolean {
+  return Math.abs(riverSignedDistance(x, z)) < RIVER_HALF_WIDTH
+}
 
 export class WorldState {
   readonly player: PlayerState = {
-    x: 0,
-    z: 0,
-    facing: 0,
+    x: -0.5,
+    z: 2.2,
+    facing: -Math.PI * 0.75,
     hp: 100,
     stamina: 100,
     attackPulse: 0,
@@ -45,12 +58,17 @@ export class WorldState {
   readonly enemies: EnemyState[] = []
   elapsed = 0
   kills = 0
+  torchOn = true
 
   private deathTimer = 0
 
   constructor() {
-    this.generateForest()
+    this.generateLandmarks()
     this.spawnEnemies()
+  }
+
+  toggleTorch(): void {
+    this.torchOn = !this.torchOn
   }
 
   update(dt: number, input: MovementInput, attack: boolean): void {
@@ -66,7 +84,8 @@ export class WorldState {
 
     const moving = Math.abs(input.x) + Math.abs(input.z) > 0.001
     const canRun = input.running && moving && this.player.stamina > 1
-    const speed = canRun ? 7.1 : 4.25
+    const waterFactor = isInsideRiver(this.player.x, this.player.z) ? 0.76 : 1
+    const speed = (canRun ? 7.1 : 4.25) * waterFactor
 
     if (canRun) this.player.stamina = Math.max(0, this.player.stamina - dt * 23)
     else this.player.stamina = Math.min(100, this.player.stamina + dt * 15)
@@ -144,7 +163,7 @@ export class WorldState {
       if (distance > 8.5 || distance < 0.001) continue
 
       if (distance > 1.15) {
-        const speed = distance < 3.4 ? 1.65 : 1.1
+        const speed = (distance < 3.4 ? 1.65 : 1.1) * (isInsideRiver(enemy.x, enemy.z) ? 0.72 : 1)
         const nx = enemy.x + (dx / distance) * speed * dt
         const nz = enemy.z + (dz / distance) * speed * dt
         if (!this.collidesTree(nx, enemy.z, 0.36)) enemy.x = nx
@@ -158,8 +177,8 @@ export class WorldState {
   }
 
   private respawn(): void {
-    this.player.x = 0
-    this.player.z = 0
+    this.player.x = -0.5
+    this.player.z = 2.2
     this.player.hp = 100
     this.player.stamina = 100
     this.player.attackPulse = 0
@@ -168,29 +187,20 @@ export class WorldState {
     if (this.enemies.length < 3) this.spawnEnemies()
   }
 
-  private generateForest(): void {
-    let seed = 0x5a17c11
-    const random = (): number => {
-      seed = (seed * 1664525 + 1013904223) >>> 0
-      return seed / 0x100000000
-    }
+  private generateLandmarks(): void {
+    const landmarks = [
+      [-5.4, 3.4, 1.05, 4.8],
+      [-1.8, 6.1, 1.35, 1.15],
+      [2.2, 6.4, 1.1, 0.95],
+      [5.8, 1.2, 2.5, 1.65],
+      [-7.8, -8.5, 1.0, 4.5],
+      [-14.5, -3.2, 2.1, 1.6],
+      [3.5, -13.5, 1.1, 4.4],
+      [-11.0, 9.2, 1.9, 1.4],
+      [10.5, -6.8, 2.4, 1.7],
+    ] as const
 
-    let attempts = 0
-    while (this.trees.length < 62 && attempts < 600) {
-      attempts += 1
-      const x = (random() * 2 - 1) * (WORLD_LIMIT - 1)
-      const z = (random() * 2 - 1) * (WORLD_LIMIT - 1)
-      const radius = 0.45 + random() * 0.48
-      if (Math.hypot(x, z) < 4.2) continue
-      if (this.trees.some((tree) => Math.hypot(tree.x - x, tree.z - z) < tree.radius + radius + 0.9)) continue
-
-      this.trees.push({
-        x,
-        z,
-        radius,
-        height: 3.7 + random() * 4.8,
-      })
-    }
+    for (const [x, z, radius, height] of landmarks) this.trees.push({ x, z, radius, height })
   }
 
   private spawnEnemies(): void {
@@ -200,8 +210,6 @@ export class WorldState {
       [-8, -7],
       [10, 8],
       [-11, 6],
-      [2, -13],
-      [-4, 14],
     ] as const
 
     for (let i = 0; i < positions.length; i += 1) {
