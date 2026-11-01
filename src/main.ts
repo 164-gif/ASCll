@@ -1,4 +1,5 @@
 import './styles.css'
+import './boot.css'
 import { App } from './app/App'
 
 const root = document.querySelector<HTMLDivElement>('#app')
