@@ -29,6 +29,8 @@ const BASE_FRUSTUM = 21
 const MAX_RIPPLES = 18
 const MAX_ROAD_SEGMENTS = 32
 const WORLD_RENDER_SIZE = 202
+const FOREST_CAMP_X = 55
+const FOREST_CAMP_Z = 29
 
 type ObjectMaterial = THREE.ShaderMaterial & {
   uniforms: THREE.ShaderMaterial['uniforms'] & {
@@ -121,6 +123,7 @@ export class WorldRenderer {
     this.buildBridges()
     this.buildLandmarks(world)
     this.buildFires()
+    this.buildForestCamp()
     this.buildGrass(world)
     this.buildKnight()
 
@@ -546,6 +549,125 @@ export class WorldRenderer {
     })
   }
 
+  private buildForestCamp(): void {
+    const baseY = terrainHeightAt(FOREST_CAMP_X, FOREST_CAMP_Z)
+    const camp = new THREE.Group()
+    camp.position.set(FOREST_CAMP_X, baseY, FOREST_CAMP_Z)
+    camp.rotation.y = -0.22
+
+    const canvas = this.createAsciiMaterial(0xa79b7d, 0x29271f, 6.8)
+    const canvasDark = this.createAsciiMaterial(0x6f6b58, 0x171713, 4.2)
+    const wood = this.createAsciiMaterial(0x775035, 0x170e08, 3.8)
+    const rope = this.createAsciiMaterial(0xbca777, 0x332719, 10.4)
+    const clothPale = this.createAsciiMaterial(0xc4bda5, 0x3a342b, 12.3)
+    const clothRed = this.createAsciiMaterial(0x87483b, 0x230d0c, 14.2)
+    const cloak = this.createAsciiMaterial(0x51483f, 0x100d0b, 8.6)
+    const hair = this.createAsciiMaterial(0xd6d8d1, 0x5d615c, 2.4, 0.08)
+
+    const addTent = (x: number, z: number, width: number, depth: number, height: number, yaw: number): void => {
+      const tent = new THREE.Group()
+      tent.position.set(x, 0.04, z)
+      tent.rotation.y = yaw
+      const slope = Math.hypot(width * 0.5, height)
+      const angle = Math.atan2(height, width * 0.5)
+      for (const side of [-1, 1]) {
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(slope, 0.09, depth), side === -1 ? canvas : canvasDark)
+        panel.position.set(side * width * 0.25, height * 0.5, 0)
+        panel.rotation.z = -side * angle
+        tent.add(panel)
+      }
+      for (const end of [-1, 1]) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, height + 0.3, 6), wood)
+        pole.position.set(0, (height + 0.3) * 0.5, end * depth * 0.5)
+        tent.add(pole)
+      }
+      const ridge = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, depth + 0.35), wood)
+      ridge.position.y = height
+      tent.add(ridge)
+      const back = new THREE.Mesh(new THREE.BoxGeometry(width * 0.82, height * 0.72, 0.08), canvasDark)
+      back.position.set(0, height * 0.36, depth * 0.5 - 0.04)
+      tent.add(back)
+      camp.add(tent)
+    }
+
+    addTent(2.8, 2.4, 4.8, 5.5, 2.7, 0.2)
+    addTent(-4.5, 2.5, 2.7, 3.1, 1.65, -0.45)
+
+    const crateGeometry = new THREE.BoxGeometry(0.8, 0.65, 0.8)
+    for (const [x, z, r] of [[0.7, 3.6, 0.1], [1.6, 3.8, -0.2], [-2.2, 2.8, 0.25]] as const) {
+      const crate = new THREE.Mesh(crateGeometry.clone(), wood)
+      crate.position.set(x, 0.34, z)
+      crate.rotation.y = r
+      camp.add(crate)
+    }
+
+    const postHeight = 2.35
+    for (const x of [-0.6, 4.2]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, postHeight, 6), wood)
+      post.position.set(x, postHeight * 0.5, 5.3)
+      camp.add(post)
+    }
+    const line = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.035, 0.035), rope)
+    line.position.set(1.8, 1.95, 5.3)
+    camp.add(line)
+
+    const hanging = [
+      { x: 0.25, width: 0.9, height: 0.72, mat: clothPale },
+      { x: 1.55, width: 1.05, height: 0.82, mat: clothRed },
+      { x: 2.95, width: 0.82, height: 0.64, mat: clothPale },
+    ]
+    for (const cloth of hanging) {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(cloth.width, cloth.height, 0.045), cloth.mat)
+      mesh.position.set(cloth.x, 1.58, 5.3)
+      mesh.rotation.z = Math.sin(cloth.x * 2.1) * 0.04
+      camp.add(mesh)
+    }
+
+    const oldMan = new THREE.Group()
+    oldMan.position.set(-1.3, 0, -1.3)
+    oldMan.rotation.y = 0.65
+    const stool = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.34, 0.72), wood)
+    stool.position.y = 0.17
+    oldMan.add(stool)
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.84, 0.52), cloak)
+    torso.position.set(0, 0.86, 0)
+    torso.rotation.x = 0.18
+    oldMan.add(torso)
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.29, 8, 7), hair)
+    head.position.set(0, 1.46, -0.08)
+    oldMan.add(head)
+    const beard = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.48, 6), hair)
+    beard.position.set(0, 1.19, -0.19)
+    beard.rotation.x = 0.18
+    oldMan.add(beard)
+    for (const side of [-1, 1]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.68, 0.2), cloak)
+      leg.position.set(side * 0.2, 0.48, -0.34)
+      leg.rotation.x = -0.62
+      oldMan.add(leg)
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.58, 0.16), cloak)
+      arm.position.set(side * 0.38, 0.88, -0.2)
+      arm.rotation.x = -0.7
+      arm.rotation.z = side * 0.28
+      oldMan.add(arm)
+    }
+    const staff = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 1.55, 5), wood)
+    staff.position.set(0.52, 0.78, -0.52)
+    staff.rotation.z = 0.12
+    oldMan.add(staff)
+    camp.add(oldMan)
+
+    for (let i = 0; i < 3; i += 1) {
+      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 1.55 + i * 0.18, 7), wood)
+      log.position.set(-4.5 + i * 0.42, 0.22, -1.6 + i * 0.18)
+      log.rotation.z = Math.PI * 0.5
+      log.rotation.y = 0.15 * i
+      camp.add(log)
+    }
+
+    this.scene.add(camp)
+  }
+
   private buildGrass(world: WorldState): void {
     const coarse = window.matchMedia('(pointer: coarse)').matches
     const bladeCount = coarse ? 76000 : 164000
@@ -583,6 +705,7 @@ export class WorldRenderer {
       const riverDist = Math.abs(riverSignedDistance(x, z))
       if (riverDist < RIVER_HALF_WIDTH + 0.08) continue
       if (roadDistanceAt(x, z) < 0.72) continue
+      if (Math.hypot(x - FOREST_CAMP_X, z - FOREST_CAMP_Z) < 6.3) continue
 
       const zone = zoneAt(x, z)
       const density =
