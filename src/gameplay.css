@@ -1,0 +1,156 @@
+.gameplay-root {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  overflow: hidden;
+  background: #000;
+  opacity: 1;
+  transition: opacity 520ms cubic-bezier(.22,.72,.16,1);
+}
+
+.gameplay-root--entering { opacity: 0; }
+
+.world-glyph-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #000;
+  image-rendering: auto;
+  cursor: crosshair;
+}
+
+.game-hud {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  color: rgba(222, 230, 226, .8);
+  font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+  text-transform: lowercase;
+}
+
+.game-hud__status {
+  position: absolute;
+  left: clamp(18px, 2.6vw, 42px);
+  top: clamp(18px, 2.8vw, 40px);
+  width: min(220px, 42vw);
+  display: grid;
+  gap: 7px;
+}
+
+.game-hud__name {
+  margin-bottom: 2px;
+  color: rgba(225, 233, 229, .64);
+  font-size: 10px;
+  letter-spacing: .18em;
+}
+
+.game-hud__meter {
+  position: relative;
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 9px;
+  color: rgba(211, 219, 215, .42);
+  font-size: 8px;
+  letter-spacing: .14em;
+}
+
+.game-hud__meter::after {
+  content: "";
+  grid-column: 2;
+  grid-row: 1;
+  height: 1px;
+  background: rgba(225, 232, 228, .11);
+}
+
+.game-hud__meter i {
+  grid-column: 2;
+  grid-row: 1;
+  display: block;
+  width: 100%;
+  height: 1px;
+  transform-origin: left center;
+  background: rgba(220, 229, 225, .72);
+  box-shadow: 0 0 7px rgba(211, 225, 217, .12);
+  transition: transform 100ms linear;
+}
+
+.game-hud__meter--stamina i { opacity: .48; }
+
+.game-hud__objective {
+  position: absolute;
+  top: clamp(18px, 2.8vw, 40px);
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(220, 228, 224, .43);
+  font-size: 9px;
+  letter-spacing: .2em;
+  white-space: nowrap;
+}
+
+.game-hud__hint {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(18px, 2.8vw, 38px);
+  transform: translateX(-50%);
+  color: rgba(211, 218, 214, .26);
+  font-size: 8px;
+  letter-spacing: .12em;
+  white-space: nowrap;
+  animation: gameplay-hint-fade 7s 2.5s both;
+}
+
+.game-hud__event {
+  position: absolute;
+  left: 50%;
+  top: 54%;
+  min-width: 80px;
+  transform: translate(-50%, -50%);
+  color: rgba(228, 234, 231, .66);
+  font-size: 10px;
+  letter-spacing: .28em;
+  text-align: center;
+}
+
+.main-menu--game-hidden,
+.glyph-backdrop--game-hidden {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.main-menu--game-hidden {
+  transition: opacity 420ms ease !important;
+}
+
+.glyph-backdrop {
+  transition: opacity 520ms ease;
+}
+
+@keyframes gameplay-hint-fade {
+  0%, 58% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@media (max-width: 720px) {
+  .game-hud__objective {
+    top: auto;
+    bottom: 58px;
+  }
+
+  .game-hud__hint {
+    width: calc(100% - 32px);
+    white-space: normal;
+    line-height: 1.6;
+    text-align: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gameplay-root,
+  .main-menu--game-hidden,
+  .glyph-backdrop { transition: none !important; }
+  .game-hud__hint { animation: none; }
+}
