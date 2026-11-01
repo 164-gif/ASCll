@@ -1,7 +1,6 @@
 import type { MovementInput } from '../input/InputController'
 import {
   WORLD_LIMIT,
-  WORLD_STRUCTURES,
   bridgeDeckHeightAt,
   createWorldLandmarks,
   isInsideRiver,
@@ -114,54 +113,19 @@ export class WorldState {
     const currentHeight = walkHeightAt(this.player.x, this.player.z)
     const nx = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, this.player.x + dx))
     const xSlope = Math.abs(walkHeightAt(nx, this.player.z) - currentHeight)
-    if (xSlope < 0.92 && !this.collidesWorld(nx, this.player.z, PLAYER_RADIUS)) this.player.x = nx
+    if (xSlope < 0.92 && !this.collidesTree(nx, this.player.z, PLAYER_RADIUS)) this.player.x = nx
 
     const nz = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, this.player.z + dz))
     const zSlope = Math.abs(walkHeightAt(this.player.x, nz) - walkHeightAt(this.player.x, this.player.z))
-    if (zSlope < 0.92 && !this.collidesWorld(this.player.x, nz, PLAYER_RADIUS)) this.player.z = nz
+    if (zSlope < 0.92 && !this.collidesTree(this.player.x, nz, PLAYER_RADIUS)) this.player.z = nz
   }
 
-  private collidesWorld(x: number, z: number, radius: number): boolean {
-    return this.collidesLandmark(x, z, radius) || this.collidesStructure(x, z, radius)
-  }
-
-  private collidesLandmark(x: number, z: number, radius: number): boolean {
-    for (const landmark of this.trees) {
-      const minDistance = radius + landmark.radius + TREE_CLEARANCE
-      const dx = x - landmark.x
-      const dz = z - landmark.z
+  private collidesTree(x: number, z: number, radius: number): boolean {
+    for (const tree of this.trees) {
+      const minDistance = radius + tree.radius + TREE_CLEARANCE
+      const dx = x - tree.x
+      const dz = z - tree.z
       if (dx * dx + dz * dz < minDistance * minDistance) return true
-    }
-    return false
-  }
-
-  private collidesStructure(x: number, z: number, radius: number): boolean {
-    for (const structure of WORLD_STRUCTURES) {
-      const dx = x - structure.x
-      const dz = z - structure.z
-      const c = Math.cos(structure.rotation)
-      const s = Math.sin(structure.rotation)
-      const lx = c * dx - s * dz
-      const lz = s * dx + c * dz
-      const halfW = structure.width * 0.5
-      const halfD = structure.depth * 0.5
-
-      if (structure.kind === 'forest-shrine') {
-        if (Math.hypot(lx, lz) < 2.45 + radius) return true
-        continue
-      }
-
-      const wallBand = 0.72 + radius
-      if (Math.abs(lz) <= halfD + radius) {
-        if (Math.abs(lx + halfW) < wallBand || Math.abs(lx - halfW) < wallBand) return true
-      }
-
-      if (Math.abs(lx) <= halfW + radius && Math.abs(lz - halfD) < wallBand) return true
-
-      if (Math.abs(lx) <= halfW + radius && Math.abs(lz + halfD) < wallBand) {
-        const gateHalf = structure.kind === 'abbey' ? 3.25 : structure.kind === 'highland-fort' ? 3.0 : 2.2
-        if (Math.abs(lx) > gateHalf - radius * 0.35) return true
-      }
     }
     return false
   }
@@ -212,8 +176,8 @@ export class WorldState {
         const speed = (distance < 3.4 ? 1.65 : 1.1) * (isInsideRiver(enemy.x, enemy.z) && !onBridge ? 0.72 : 1)
         const nx = enemy.x + (dx / distance) * speed * dt
         const nz = enemy.z + (dz / distance) * speed * dt
-        if (!this.collidesWorld(nx, enemy.z, 0.36)) enemy.x = nx
-        if (!this.collidesWorld(enemy.x, nz, 0.36)) enemy.z = nz
+        if (!this.collidesTree(nx, enemy.z, 0.36)) enemy.x = nx
+        if (!this.collidesTree(enemy.x, nz, 0.36)) enemy.z = nz
       } else if (enemy.attackCooldown <= 0) {
         enemy.attackCooldown = 1.1
         this.player.hp = Math.max(0, this.player.hp - 11)
