@@ -333,8 +333,8 @@ export class BootSequence {
 
       if (scatter > 0) {
         const menuTarget = menuTargets[i]
-        let scatterX = menuTarget?.x ?? this.width * (0.08 + particle.c * 0.2)
-        let scatterY = menuTarget?.y ?? this.height * (0.42 + particle.c * 0.28)
+        let scatterX = menuTarget?.x ?? this.width * 0.5
+        let scatterY = menuTarget?.y ?? this.height * 0.5
 
         if (!menuTarget) {
           if (i < 12) {
