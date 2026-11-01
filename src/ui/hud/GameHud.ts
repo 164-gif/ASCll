@@ -20,7 +20,7 @@ export class GameHud {
         <span class="game-hud__name" data-torch></span>
       </div>
       <div class="game-hud__objective" data-objective>речная низина</div>
-      <div class="game-hud__hint">WASD двигаться · SHIFT бег · SPACE / ЛКМ удар · F свет · Z макро ASCII · колесо масштаб · ESC меню</div>
+      <div class="game-hud__hint">WASD двигаться · SHIFT бег · SPACE / ЛКМ удар · F свет · M карта · Z макро ASCII · колесо масштаб · ESC меню</div>
       <div class="game-hud__event" data-status></div>
     `
 
