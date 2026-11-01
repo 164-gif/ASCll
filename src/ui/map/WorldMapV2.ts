@@ -28,10 +28,8 @@ export class WorldMap {
   private readonly onOpenChange: (open: boolean) => void
   private open = false
   private staticLayer: HTMLCanvasElement | null = null
-  private world: WorldState
 
   constructor(parent: HTMLElement, world: WorldState, onOpenChange: (open: boolean) => void) {
-    this.world = world
     this.onOpenChange = onOpenChange
 
     this.openButton = document.createElement('button')
@@ -144,17 +142,14 @@ export class WorldMap {
   }
 
   toggle(world: WorldState): void {
-    this.world = world
     this.setOpen(!this.open, world)
   }
 
   close(world: WorldState): void {
-    this.world = world
     this.setOpen(false, world)
   }
 
   update(world: WorldState): void {
-    this.world = world
     if (!this.open) return
     this.draw(world)
   }
