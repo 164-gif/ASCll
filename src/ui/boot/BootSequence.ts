@@ -9,7 +9,19 @@ type GlyphParticle = {
   alpha: number
 }
 
+type MenuGlyphTarget = {
+  glyph: string
+  x: number
+  y: number
+  fontSize: number
+  fontFamily: string
+  fontWeight: string
+  fontStyle: string
+  color: [number, number, number]
+}
+
 const GLYPHS = ['/', '\\', '|', ':', '.', '·', '[', ']', '0', '1', '+']
+const FLIGHT_GLYPHS = '01/\\|:+·*АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ'
 const ease = (value: number): number => {
   const x = Math.max(0, Math.min(1, value))
   return x * x * (3 - 2 * x)
@@ -61,11 +73,12 @@ export class BootSequence {
     this.buildParticles()
   }
 
-  async play(): Promise<void> {
+  async play(onMenuReveal: () => void): Promise<void> {
     if (this.reducedMotion) {
       this.element.classList.add('boot-sequence--active', 'boot-sequence--locked')
       this.updateReadout(1, 'загрузка')
       await sleep(260)
+      onMenuReveal()
       this.element.classList.add('boot-sequence--leaving')
       await sleep(180)
       this.destroy()
@@ -95,8 +108,8 @@ export class BootSequence {
     })
 
     await sleep(260)
-    this.element.classList.add('boot-sequence--leaving')
-    await sleep(960)
+    onMenuReveal()
+    await this.scatterIntoMenu()
     this.destroy()
   }
 
@@ -175,28 +188,122 @@ export class BootSequence {
     if (bar) bar.style.transform = `scaleX(${progress})`
   }
 
-  private render(progress: number, seconds: number): void {
+  private scatterIntoMenu(): Promise<void> {
+    const started = performance.now()
+    const duration = 1900
+    const targets = this.collectMenuGlyphTargets()
+
+    return new Promise((resolve) => {
+      const tick = (now: number): void => {
+        const scatter = ease((now - started) / duration)
+        this.render(1, now * 0.001, scatter, targets)
+
+        if (scatter >= 1) {
+          this.frame = 0
+          resolve()
+          return
+        }
+
+        this.frame = requestAnimationFrame(tick)
+      }
+
+      this.frame = requestAnimationFrame(tick)
+    })
+  }
+
+  private collectMenuGlyphTargets(): MenuGlyphTarget[] {
+    const menu = this.element.parentElement?.querySelector<HTMLElement>('.main-menu')
+    if (!menu) return []
+
+    const canvasRect = this.canvas.getBoundingClientRect()
+    const elements = menu.querySelectorAll<HTMLElement>(
+      '.menu-wordmark, .fullscreen-button__label, .menu-caption, .menu-action__label, .menu-version, .menu-track span, .menu-track b, .menu-footer span',
+    )
+    const targets: MenuGlyphTarget[] = []
+
+    for (const element of elements) {
+      const style = window.getComputedStyle(element)
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      let node = walker.nextNode()
+
+      while (node) {
+        const text = node.textContent ?? ''
+        for (let index = 0; index < text.length; index += 1) {
+          const character = text[index] ?? ''
+          if (!character.trim()) continue
+
+          const range = document.createRange()
+          range.setStart(node, index)
+          range.setEnd(node, index + 1)
+          const rect = range.getBoundingClientRect()
+          if (rect.width <= 0 || rect.height <= 0) continue
+
+          let glyph = character
+          if (style.textTransform === 'uppercase') glyph = glyph.toLocaleUpperCase('ru-RU')
+          if (style.textTransform === 'lowercase') glyph = glyph.toLocaleLowerCase('ru-RU')
+
+          const fontSize = Number.parseFloat(style.fontSize) || 10
+          const color = style.color.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [215, 219, 217]
+          targets.push({
+            glyph,
+            x: rect.left + rect.width * 0.5 - canvasRect.left,
+            y: rect.top + rect.height * 0.5 - canvasRect.top,
+            fontSize,
+            fontFamily: style.fontFamily,
+            fontWeight: style.fontWeight,
+            fontStyle: style.fontStyle,
+            color: [color[0] ?? 215, color[1] ?? 219, color[2] ?? 217],
+          })
+        }
+        node = walker.nextNode()
+      }
+    }
+
+    return targets
+  }
+
+  private render(progress: number, seconds: number, scatter = 0, menuTargets: MenuGlyphTarget[] = []): void {
     this.ctx.clearRect(0, 0, this.width, this.height)
     if (progress >= 0.76 && progress < 0.84) return
 
-    const cx = this.width * 0.5
+    const sceneReveal = ease((scatter - 0.62) / 0.38)
+    this.element.style.backgroundColor = `rgba(0,0,0,${1 - sceneReveal})`
+    if (scatter > 0) {
+      const readout = this.element.querySelector<HTMLElement>('.boot-readout')
+      const progressBar = this.element.querySelector<HTMLElement>('.boot-progress')
+      if (readout) readout.style.opacity = String(1 - sceneReveal)
+      if (progressBar) progressBar.style.opacity = String(1 - sceneReveal)
+    }
+
+    const centerX = this.width * 0.5
+    const menuCenterX = this.width * (this.width < 760 ? 0.69 : 0.73)
+    const flightProgress = ease(scatter / 0.62)
+    const circleMotion = flightProgress
+    const cx = centerX + (menuCenterX - centerX) * circleMotion
     const cy = this.height * 0.49
     const minSize = Math.min(this.width, this.height)
+    const menuLeft = Math.min(86, Math.max(24, this.width * 0.054))
+    const menuWidth = Math.min(230, this.width * 0.42)
+    const menuTop = this.height * (this.width < 760 ? 0.6 : 0.54)
     const assembling = ease((progress - 0.06) / 0.52)
     const collapse = ease((progress - 0.60) / 0.16)
     const locked = ease((progress - 0.84) / 0.12)
 
     this.ctx.save()
-    this.ctx.strokeStyle = `rgba(224,231,228,${0.025 + assembling * 0.05})`
+    this.ctx.strokeStyle = `rgba(224,231,228,${(0.025 + assembling * 0.05) * (1 - sceneReveal)})`
     this.ctx.lineWidth = 1
     this.ctx.beginPath()
-    this.ctx.arc(cx, cy, minSize * 0.19, 0, Math.PI * 2)
+    const menuCircleRadius = minSize * (this.width < 760 ? 0.22 : 0.27) * 1.48
+    const circleRadius = minSize * 0.19 + (menuCircleRadius - minSize * 0.19) * circleMotion
+    this.ctx.arc(cx, cy, circleRadius, 0, Math.PI * 2)
     this.ctx.stroke()
     this.ctx.restore()
 
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
-    this.ctx.font = `${Math.max(8, minSize * 0.0115)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+    const baseFontSize = Math.max(8, minSize * 0.0115)
+    const baseFontFamily = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+    this.ctx.save()
 
     for (let i = 0; i < this.particles.length; i += 1) {
       const particle = this.particles[i]
@@ -224,14 +331,65 @@ export class BootSequence {
         y = cy + Math.sin(lockedAngle) * ring * 0.46
       }
 
+      if (scatter > 0) {
+        const menuTarget = menuTargets[i]
+        let scatterX = menuTarget?.x ?? this.width * (0.08 + particle.c * 0.2)
+        let scatterY = menuTarget?.y ?? this.height * (0.42 + particle.c * 0.28)
+
+        if (!menuTarget) {
+          if (i < 12) {
+            scatterX = this.width * (0.05 + i / 11 * 0.08)
+            scatterY = this.height * (0.055 + Math.sin(i * 1.7) * 0.008)
+          } else if (i < 24) {
+            scatterX = this.width * (0.82 + (i - 12) / 11 * 0.13)
+            scatterY = this.height * (0.055 + Math.sin(i * 1.7) * 0.008)
+          } else if (i < 138) {
+            const menuIndex = i - 24
+            const row = Math.floor(menuIndex / 23)
+            const column = menuIndex % 23
+            scatterX = menuLeft + column / 22 * menuWidth
+            scatterY = menuTop - 54 + row * 24 + Math.sin(i * 1.7) * 2
+          } else {
+            const footerIndex = i - 138
+            scatterX = this.width * (0.05 + footerIndex / 25 * 0.9)
+            scatterY = this.height * 0.955 + Math.sin(i * 1.7) * 2
+          }
+        }
+
+        x += (scatterX - x) * flightProgress
+        y += (scatterY - y) * flightProgress
+      }
+
       const appear = ease((progress - (i / this.particles.length) * 0.12) / 0.18)
       const alpha = particle.alpha * appear * (progress > 0.97 ? 1 - ease((progress - 0.97) / 0.03) * 0.55 : 1)
-      this.ctx.fillStyle = `rgba(224,231,228,${alpha})`
-      this.ctx.fillText(particle.glyph, x, y)
+      const menuTarget = menuTargets[i]
+      const settled = menuTarget ? ease((scatter - 0.25) / 0.37) : 0
+      const cycle = Math.floor(seconds * 26 + particle.phase * 13 + i * 7)
+      const transitGlyph = FLIGHT_GLYPHS[(cycle % FLIGHT_GLYPHS.length + FLIGHT_GLYPHS.length) % FLIGHT_GLYPHS.length] ?? particle.glyph
+      const glyph = menuTarget && scatter >= 0.28 + (i % 7) * 0.045
+        ? menuTarget.glyph
+        : scatter > 0 ? transitGlyph : particle.glyph
+
+      if (menuTarget) {
+        const fontSize = baseFontSize + (menuTarget.fontSize - baseFontSize) * settled
+        this.ctx.font = `${menuTarget.fontStyle} ${menuTarget.fontWeight} ${fontSize.toFixed(2)}px ${menuTarget.fontFamily}`
+        const red = 224 + (menuTarget.color[0] - 224) * settled
+        const green = 231 + (menuTarget.color[1] - 231) * settled
+        const blue = 228 + (menuTarget.color[2] - 228) * settled
+        this.ctx.fillStyle = `rgb(${Math.round(red)},${Math.round(green)},${Math.round(blue)})`
+        this.ctx.globalAlpha = (alpha + (1 - alpha) * settled) * (1 - sceneReveal)
+      } else {
+        this.ctx.font = `${baseFontSize}px ${baseFontFamily}`
+        this.ctx.fillStyle = `rgba(224,231,228,${alpha * (1 - flightProgress)})`
+        this.ctx.globalAlpha = 1
+      }
+
+      this.ctx.fillText(glyph, x, y)
     }
+    this.ctx.restore()
 
     if (locked > 0) {
-      this.ctx.fillStyle = `rgba(234,239,237,${0.15 + locked * 0.54})`
+      this.ctx.fillStyle = `rgba(234,239,237,${(0.15 + locked * 0.54) * (1 - sceneReveal)})`
       this.ctx.font = `${Math.max(18, minSize * 0.044)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
       this.ctx.fillText('a', cx, cy)
     }

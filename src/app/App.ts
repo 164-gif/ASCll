@@ -42,9 +42,10 @@ export class App {
       void this.audio.unlock()
     })
     this.audio.bootStart()
-    await this.boot.play()
-    this.audio.menuReveal()
-    this.menu.reveal()
+    await this.boot.play(() => {
+      this.audio.menuReveal()
+      this.menu.reveal()
+    })
   }
 
   destroy(): void {
