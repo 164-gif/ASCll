@@ -1,5 +1,13 @@
 import * as THREE from 'three'
-import { isInsideRiver, riverSignedDistance, type EnemyState, type WorldState } from '../../simulation/WorldState'
+import { type EnemyState, type WorldState } from '../../simulation/WorldState'
+import {
+  RIVER_HALF_WIDTH,
+  isInsideRiver,
+  riverSignedDistance,
+  terrainHeightAt,
+  zoneAt,
+  type WorldLandmark,
+} from '../../world/WorldLayout'
 import { createAsciiAtlas } from './AsciiAtlas'
 import {
   grassFragmentShader,
@@ -12,6 +20,7 @@ import {
 
 const BASE_FRUSTUM = 21
 const MAX_RIPPLES = 18
+const WORLD_RENDER_SIZE = 202
 
 type ObjectMaterial = THREE.ShaderMaterial & {
   uniforms: THREE.ShaderMaterial['uniforms'] & {
@@ -26,7 +35,7 @@ export class WorldRenderer {
   readonly element: HTMLCanvasElement
 
   private readonly scene = new THREE.Scene()
-  private readonly camera = new THREE.OrthographicCamera(-10, 10, 10, -10, -100, 200)
+  private readonly camera = new THREE.OrthographicCamera(-10, 10, 10, -10, -100, 240)
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
   private readonly resizeObserver: ResizeObserver
   private readonly atlas = createAsciiAtlas()
@@ -97,13 +106,15 @@ export class WorldRenderer {
   render(world: WorldState, dt: number): void {
     if (this.disposed) return
 
+    const playerY = terrainHeightAt(world.player.x, world.player.z)
     this.shared.uTime.value = world.elapsed
-    this.shared.uPlayerPos.value.set(world.player.x, 0, world.player.z)
+    this.shared.uPlayerPos.value.set(world.player.x, playerY, world.player.z)
+
     const torchTarget = world.torchOn ? 1 : 0
     this.shared.uTorchPower.value += (torchTarget - this.shared.uTorchPower.value) * Math.min(1, dt * 4.5)
     this.torchPos.set(
       world.player.x + Math.sin(world.player.facing) * 0.45,
-      1.45,
+      playerY + 1.45,
       world.player.z + Math.cos(world.player.facing) * 0.45,
     )
 
@@ -111,7 +122,6 @@ export class WorldRenderer {
     this.syncPlayer(world, dt)
     this.syncEnemies(world.enemies)
     this.syncCamera(world, dt)
-
     this.renderer.render(this.scene, this.camera)
   }
 
@@ -163,8 +173,19 @@ export class WorldRenderer {
   }
 
   private buildGround(): void {
-    const geometry = new THREE.PlaneGeometry(110, 110, 1, 1)
+    const geometry = new THREE.PlaneGeometry(WORLD_RENDER_SIZE, WORLD_RENDER_SIZE, 88, 88)
     geometry.rotateX(-Math.PI / 2)
+    const position = geometry.attributes.position
+    if (position) {
+      for (let i = 0; i < position.count; i += 1) {
+        const x = position.getX(i)
+        const z = position.getZ(i)
+        position.setY(i, terrainHeightAt(x, z))
+      }
+      position.needsUpdate = true
+      geometry.computeVertexNormals()
+    }
+
     const material = new THREE.ShaderMaterial({
       vertexShader: groundVertexShader,
       fragmentShader: groundFragmentShader,
@@ -175,15 +196,28 @@ export class WorldRenderer {
 
   private buildLandmarks(world: WorldState): void {
     const stone = this.createAsciiMaterial(0x7c858e, 0x161a1e, 1.3)
-    const moss = this.createAsciiMaterial(0x68766c, 0x141916, 4.7)
+    const mossStone = this.createAsciiMaterial(0x68766c, 0x141916, 4.7)
+    const ruinStone = this.createAsciiMaterial(0x8a8174, 0x211e1a, 7.1)
+    const bark = this.createAsciiMaterial(0x72513a, 0x17100b, 3.8)
+    const pine = this.createAsciiMaterial(0x315f42, 0x08140d, 9.6)
 
     world.trees.forEach((landmark, index) => {
-      if (landmark.height > 3.5) {
+      const baseY = terrainHeightAt(landmark.x, landmark.z)
+      if (landmark.kind === 'tree') {
+        this.buildTree(landmark, baseY, bark, pine, index)
+        return
+      }
+      if (landmark.kind === 'ruin') {
+        this.buildRuin(landmark, baseY, ruinStone, index)
+        return
+      }
+      if (landmark.kind === 'monolith') {
         const group = new THREE.Group()
-        group.position.set(landmark.x, 0, landmark.z)
+        group.position.set(landmark.x, baseY, landmark.z)
+        group.rotation.y = landmark.rotation ?? 0
 
         const base = new THREE.Mesh(
-          new THREE.BoxGeometry(landmark.radius * 2.1, 0.8, landmark.radius * 1.6),
+          new THREE.BoxGeometry(landmark.radius * 2.15, 0.8, landmark.radius * 1.65),
           stone,
         )
         base.position.y = 0.4
@@ -194,6 +228,7 @@ export class WorldRenderer {
           stone,
         )
         pillar.position.y = landmark.height * 0.5
+        pillar.rotation.z = Math.sin(index * 1.73) * 0.025
         group.add(pillar)
         this.scene.add(group)
         return
@@ -201,28 +236,98 @@ export class WorldRenderer {
 
       const geometry = new THREE.DodecahedronGeometry(1, 1)
       geometry.scale(landmark.radius, landmark.height, landmark.radius * (0.72 + (index % 3) * 0.1))
-      const mesh = new THREE.Mesh(geometry, index % 2 === 0 ? stone : moss)
-      mesh.position.set(landmark.x, landmark.height * 0.34, landmark.z)
-      mesh.rotation.set(0.08 * (index % 2), index * 1.1, 0.04 * (index % 3))
+      const mesh = new THREE.Mesh(geometry, index % 2 === 0 ? stone : mossStone)
+      mesh.position.set(landmark.x, baseY + landmark.height * 0.34, landmark.z)
+      mesh.rotation.set(0.08 * (index % 2), landmark.rotation ?? index * 1.1, 0.04 * (index % 3))
       this.scene.add(mesh)
     })
   }
 
+  private buildTree(
+    landmark: WorldLandmark,
+    baseY: number,
+    bark: ObjectMaterial,
+    pine: ObjectMaterial,
+    index: number,
+  ): void {
+    const group = new THREE.Group()
+    group.position.set(landmark.x, baseY, landmark.z)
+    group.rotation.y = landmark.rotation ?? index * 0.71
+
+    const trunkHeight = landmark.height * 0.58
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(landmark.radius * 0.18, landmark.radius * 0.31, trunkHeight, 6),
+      bark,
+    )
+    trunk.position.y = trunkHeight * 0.5
+    group.add(trunk)
+
+    const crown1 = new THREE.Mesh(
+      new THREE.ConeGeometry(landmark.radius * 2.25, landmark.height * 0.45, 7),
+      pine,
+    )
+    crown1.position.y = landmark.height * 0.55
+    crown1.rotation.y = index * 0.43
+    group.add(crown1)
+
+    const crown2 = new THREE.Mesh(
+      new THREE.ConeGeometry(landmark.radius * 1.72, landmark.height * 0.39, 7),
+      pine,
+    )
+    crown2.position.y = landmark.height * 0.73
+    crown2.rotation.y = index * 0.67
+    group.add(crown2)
+
+    const crown3 = new THREE.Mesh(
+      new THREE.ConeGeometry(landmark.radius * 1.12, landmark.height * 0.31, 7),
+      pine,
+    )
+    crown3.position.y = landmark.height * 0.88
+    group.add(crown3)
+
+    this.scene.add(group)
+  }
+
+  private buildRuin(landmark: WorldLandmark, baseY: number, material: ObjectMaterial, index: number): void {
+    const group = new THREE.Group()
+    group.position.set(landmark.x, baseY, landmark.z)
+    group.rotation.y = landmark.rotation ?? 0
+
+    const wall = new THREE.Mesh(
+      new THREE.BoxGeometry(landmark.radius * 2.3, landmark.height, 0.42),
+      material,
+    )
+    wall.position.y = landmark.height * 0.5
+    group.add(wall)
+
+    const broken = new THREE.Mesh(
+      new THREE.BoxGeometry(0.46, landmark.height * 0.72, landmark.radius * 1.7),
+      material,
+    )
+    broken.position.set(landmark.radius * 0.58, landmark.height * 0.36, 0.2)
+    broken.rotation.y = 0.06 * ((index % 3) - 1)
+    group.add(broken)
+
+    const fallen = new THREE.Mesh(
+      new THREE.BoxGeometry(landmark.radius * 1.15, 0.34, 0.52),
+      material,
+    )
+    fallen.position.set(-landmark.radius * 0.55, 0.2, landmark.radius * 0.72)
+    fallen.rotation.y = 0.6
+    group.add(fallen)
+
+    this.scene.add(group)
+  }
+
   private buildGrass(world: WorldState): void {
     const coarse = window.matchMedia('(pointer: coarse)').matches
-    const bladeCount = coarse ? 24000 : 48000
-    const spread = 54
+    const bladeCount = coarse ? 52000 : 118000
+    const spread = 178
+
     const base = new THREE.BufferGeometry()
     base.setAttribute(
       'position',
-      new THREE.BufferAttribute(
-        new Float32Array([
-          -0.042, 0, 0,
-          0.042, 0, 0,
-          0, 1, 0,
-        ]),
-        3,
-      ),
+      new THREE.BufferAttribute(new Float32Array([-0.05, 0, 0, 0.05, 0, 0, 0, 1, 0]), 3),
     )
 
     const geometry = new THREE.InstancedBufferGeometry()
@@ -238,18 +343,18 @@ export class WorldRenderer {
       return seed / 0x100000000
     }
 
-    while (valid < bladeCount && attempts < bladeCount * 3) {
+    while (valid < bladeCount && attempts < bladeCount * 4) {
       attempts += 1
       const x = (random() - 0.5) * spread
       const z = (random() - 0.5) * spread
       const riverDist = Math.abs(riverSignedDistance(x, z))
-      if (riverDist < 6.95) continue
+      if (riverDist < RIVER_HALF_WIDTH + 0.15) continue
 
       let blocked = false
       for (const obstacle of world.trees) {
         const dx = x - obstacle.x
         const dz = z - obstacle.z
-        const radius = obstacle.radius * 1.05
+        const radius = obstacle.radius * (obstacle.kind === 'tree' ? 0.72 : 1.08)
         if (dx * dx + dz * dz < radius * radius) {
           blocked = true
           break
@@ -257,16 +362,33 @@ export class WorldRenderer {
       }
       if (blocked) continue
 
+      const zone = zoneAt(x, z)
       offsets[valid * 3] = x
-      offsets[valid * 3 + 1] = 0
+      offsets[valid * 3 + 1] = terrainHeightAt(x, z)
       offsets[valid * 3 + 2] = z
 
-      const bank = Math.min(1, (riverDist - 6.8) * 0.5)
-      const height = (0.38 + random() * 0.42) * (0.45 + 0.55 * bank)
+      const bank = Math.min(1, Math.max(0, (riverDist - RIVER_HALF_WIDTH) * 0.45))
+      let height = 0.34 + random() * 0.46
+      let flowerChance = 0.028
+      if (zone.id === 'meadow') {
+        height *= 1.18
+        flowerChance = 0.09
+      } else if (zone.id === 'forest') {
+        height *= 0.82
+        flowerChance = 0.012
+      } else if (zone.id === 'highland') {
+        height *= 0.66
+        flowerChance = 0.018
+      } else if (zone.id === 'ruins') {
+        height *= 0.76
+        flowerChance = 0.022
+      }
+      height *= 0.52 + 0.48 * bank
+
       const flowerRoll = random()
       scaleRot[valid * 3] = height
       scaleRot[valid * 3 + 1] = random()
-      scaleRot[valid * 3 + 2] = flowerRoll > 0.962 ? (flowerRoll > 0.992 ? 2 : 1) : 0
+      scaleRot[valid * 3 + 2] = flowerRoll > 1 - flowerChance ? (flowerRoll > 0.992 ? 2 : 1) : 0
       valid += 1
     }
 
@@ -352,41 +474,40 @@ export class WorldRenderer {
     const moving = moved > 0.0003
     if (moving) this.walkCycle += dt * (isInsideRiver(world.player.x, world.player.z) ? 9.5 : 12)
 
+    const riverDistance = Math.abs(riverSignedDistance(world.player.x, world.player.z))
     const sink = isInsideRiver(world.player.x, world.player.z)
-      ? -0.28 * Math.min(1, (6.8 - Math.abs(riverSignedDistance(world.player.x, world.player.z))) * 0.6)
+      ? -0.28 * Math.min(1, (RIVER_HALF_WIDTH - riverDistance) * 0.6)
       : 0
+    const baseY = terrainHeightAt(world.player.x, world.player.z)
 
-    this.playerGroup.position.set(world.player.x, sink, world.player.z)
+    this.playerGroup.position.set(world.player.x, baseY + sink, world.player.z)
     this.playerGroup.rotation.y = world.player.facing
 
-    const legSwing = moving ? Math.sin(this.walkCycle) * 0.55 : 0
-    if (this.leftLeg) this.leftLeg.rotation.x = legSwing
-    if (this.rightLeg) this.rightLeg.rotation.x = -legSwing
-
-    if (this.capeMesh) {
-      this.capeMesh.rotation.x = 0.2 + (moving ? 0.28 : 0.04) + Math.sin(world.elapsed * 4.5) * 0.07
-      this.capeMesh.rotation.z = Math.cos(world.elapsed * 3.2) * 0.05
+    if (this.leftLeg && this.rightLeg) {
+      const swing = moving ? Math.sin(this.walkCycle) * 0.55 : 0
+      this.leftLeg.rotation.x = swing
+      this.rightLeg.rotation.x = -swing
     }
 
-    const attacking = world.player.attackPulse > 0
-    if (attacking) {
-      const phase = 1 - world.player.attackPulse / 0.34
-      if (this.rightArm) {
-        this.rightArm.rotation.y = -1.2 + phase * 2.5
-        this.rightArm.rotation.x = 0.35
-      }
-      if (this.slashMesh) {
+    if (this.capeMesh) {
+      this.capeMesh.rotation.x = 0.2 + (moving ? 0.24 : 0.04) + Math.sin(world.elapsed * 4.5) * 0.055
+      this.capeMesh.rotation.z = Math.cos(world.elapsed * 3.2) * 0.04
+    }
+
+    if (this.rightArm && this.slashMesh) {
+      if (world.player.attackPulse > 0) {
+        const p = 1 - world.player.attackPulse / 0.34
+        this.rightArm.rotation.y = -1.15 + p * 2.4
+        this.rightArm.rotation.x = 0.34
         this.slashMesh.visible = true
-        this.slashMesh.rotation.y = phase * 1.4
+        this.slashMesh.rotation.y = p * 1.35
+        this.shared.uSwingTime.value = Math.sin(Math.max(0, Math.min(1, p)) * Math.PI)
+      } else {
+        this.rightArm.rotation.y = Math.sin(world.elapsed * 2) * 0.07
+        this.rightArm.rotation.x = 0.15 + (moving ? Math.cos(this.walkCycle) * 0.22 : 0)
+        this.slashMesh.visible = false
+        this.shared.uSwingTime.value = 0
       }
-      this.shared.uSwingTime.value = Math.sin(phase * Math.PI)
-    } else {
-      if (this.rightArm) {
-        this.rightArm.rotation.y = Math.sin(world.elapsed * 2) * 0.08
-        this.rightArm.rotation.x = 0.15 + (moving ? Math.cos(this.walkCycle) * 0.25 : 0)
-      }
-      if (this.slashMesh) this.slashMesh.visible = false
-      this.shared.uSwingTime.value = 0
     }
 
     this.lastX = world.player.x
@@ -395,23 +516,18 @@ export class WorldRenderer {
 
   private createEnemy(enemy: EnemyState): THREE.Group {
     const group = new THREE.Group()
-    const bodyMaterial = this.createAsciiMaterial(0x9b343d, 0x24070b, 19 + enemy.id, 0.08)
-    const eyeMaterial = this.createAsciiMaterial(0xffb09c, 0x5a1513, 27 + enemy.id, 0.45)
+    const bodyMaterial = this.createAsciiMaterial(0x8f2833, 0x220609, 17 + enemy.id * 0.37, 0.08)
+    const boneMaterial = this.createAsciiMaterial(0xd3c8af, 0x302b23, 12 + enemy.id * 0.21, 0.02)
 
-    const body = new THREE.Mesh(new THREE.ConeGeometry(0.46, 1.5, 6), bodyMaterial)
-    body.position.y = 0.75
+    const body = new THREE.Mesh(new THREE.ConeGeometry(0.46, 1.28, 5), bodyMaterial)
+    body.position.y = 0.68
     group.add(body)
 
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 7, 6), bodyMaterial)
-    head.position.y = 1.48
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 7, 6), boneMaterial)
+    head.position.y = 1.42
     group.add(head)
 
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 5, 4), eyeMaterial)
-    eye.position.set(0, 1.5, 0.2)
-    group.add(eye)
-
     group.userData.bodyMaterial = bodyMaterial
-    group.position.set(enemy.x, 0, enemy.z)
     this.scene.add(group)
     this.enemyMeshes.set(enemy.id, group)
     return group
@@ -422,7 +538,8 @@ export class WorldRenderer {
     for (const enemy of enemies) {
       alive.add(enemy.id)
       const group = this.enemyMeshes.get(enemy.id) ?? this.createEnemy(enemy)
-      group.position.set(enemy.x, isInsideRiver(enemy.x, enemy.z) ? -0.2 : 0, enemy.z)
+      const baseY = terrainHeightAt(enemy.x, enemy.z)
+      group.position.set(enemy.x, baseY + (isInsideRiver(enemy.x, enemy.z) ? -0.2 : 0), enemy.z)
       const dx = this.shared.uPlayerPos.value.x - enemy.x
       const dz = this.shared.uPlayerPos.value.z - enemy.z
       group.rotation.y = Math.atan2(dx, dz)
@@ -473,10 +590,12 @@ export class WorldRenderer {
     this.camera.zoom = this.currentZoom
 
     const targetX = world.player.x
+    const targetY = terrainHeightAt(world.player.x, world.player.z)
     const targetZ = world.player.z + 22
     this.camera.position.x += (targetX - this.camera.position.x) * Math.min(1, dt * 6)
+    this.camera.position.y += (targetY + 26 - this.camera.position.y) * Math.min(1, dt * 4.5)
     this.camera.position.z += (targetZ - this.camera.position.z) * Math.min(1, dt * 6)
-    this.camera.lookAt(world.player.x, 0, world.player.z)
+    this.camera.lookAt(world.player.x, targetY, world.player.z)
     this.camera.updateProjectionMatrix()
     this.camera.updateMatrixWorld()
 
