@@ -1,15 +1,23 @@
 import * as THREE from 'three'
 import type { EnemyState, WorldState } from '../../simulation/WorldState'
 
-const GLYPH_RAMP = [' ', '.', '·', ':', '/', '\\', '|', '+', '*', '%', '#', '@']
+const GLYPH_RAMP = ['.', '·', ':', ';', '/', '\\', '|', '+', '*', '%', '#', '@']
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
+
+const toDisplayChannel = (value: number): number => {
+  const linear = clamp01(value / 255)
+  const lifted = Math.pow(linear, 1 / 2.15)
+  return Math.round(clamp01(lifted * 1.18 + 0.018) * 255)
+}
 
 export class WorldRenderer {
   readonly element: HTMLCanvasElement
 
   private readonly scene = new THREE.Scene()
-  private readonly camera = new THREE.PerspectiveCamera(52, 1, 0.1, 120)
+  private readonly camera = new THREE.PerspectiveCamera(49, 1, 0.1, 120)
   private readonly renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' })
-  private readonly target = new THREE.WebGLRenderTarget(80, 45, {
+  private readonly target = new THREE.WebGLRenderTarget(88, 50, {
     depthBuffer: true,
     stencilBuffer: false,
     minFilter: THREE.LinearFilter,
@@ -18,15 +26,15 @@ export class WorldRenderer {
   private readonly ctx: CanvasRenderingContext2D
   private readonly resizeObserver: ResizeObserver
   private readonly playerGroup = new THREE.Group()
-  private readonly playerLight = new THREE.PointLight(0xa6c8b6, 5.2, 12, 1.8)
+  private readonly playerLight = new THREE.PointLight(0xc4dfcf, 8.5, 15, 1.55)
   private readonly attackRing: THREE.Mesh
   private readonly enemyMeshes = new Map<number, THREE.Group>()
 
   private width = 1
   private height = 1
   private dpr = 1
-  private cols = 80
-  private rows = 45
+  private cols = 88
+  private rows = 50
   private pixels = new Uint8Array(this.cols * this.rows * 4)
 
   constructor(parent: HTMLElement, world: WorldState) {
@@ -37,22 +45,26 @@ export class WorldRenderer {
     this.ctx = context
     parent.append(this.element)
 
-    this.scene.background = new THREE.Color(0x000000)
-    this.scene.fog = new THREE.FogExp2(0x000000, 0.038)
-    this.camera.position.set(7.8, 9.6, 9.8)
+    this.scene.background = new THREE.Color(0x020604)
+    this.scene.fog = new THREE.FogExp2(0x020604, 0.019)
+    this.camera.position.set(7.1, 8.3, 8.9)
 
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.25
+    this.renderer.toneMappingExposure = 2.15
     this.renderer.setPixelRatio(1)
     this.renderer.setSize(16, 16, false)
 
-    const hemi = new THREE.HemisphereLight(0x879b9e, 0x07100d, 1.55)
+    const hemi = new THREE.HemisphereLight(0xb7c9c5, 0x15251c, 3.1)
     this.scene.add(hemi)
 
-    const moon = new THREE.DirectionalLight(0xc8dae5, 2.9)
+    const moon = new THREE.DirectionalLight(0xd5e5ee, 4.2)
     moon.position.set(-9, 17, 6)
     this.scene.add(moon)
+
+    const fill = new THREE.DirectionalLight(0x6d8f79, 1.55)
+    fill.position.set(10, 7, -12)
+    this.scene.add(fill)
 
     this.playerLight.position.set(0, 2.2, 0)
     this.scene.add(this.playerLight)
@@ -63,7 +75,7 @@ export class WorldRenderer {
 
     const ringGeometry = new THREE.RingGeometry(0.8, 1.05, 32)
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xcad9d1,
+      color: 0xe1eee7,
       transparent: true,
       opacity: 0,
       side: THREE.DoubleSide,
@@ -120,8 +132,8 @@ export class WorldRenderer {
     this.element.style.height = `${this.height}px`
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
 
-    this.cols = Math.max(64, Math.min(102, Math.round(this.width / 12)))
-    this.rows = Math.max(38, Math.min(64, Math.round(this.cols * (this.height / this.width) * 0.62)))
+    this.cols = Math.max(72, Math.min(118, Math.round(this.width / 10.5)))
+    this.rows = Math.max(42, Math.min(72, Math.round(this.cols * (this.height / this.width) * 0.59)))
     this.target.setSize(this.cols, this.rows)
     this.pixels = new Uint8Array(this.cols * this.rows * 4)
 
@@ -144,7 +156,9 @@ export class WorldRenderer {
     }
 
     const material = new THREE.MeshStandardMaterial({
-      color: 0x101a15,
+      color: 0x314a39,
+      emissive: 0x07100a,
+      emissiveIntensity: 0.9,
       roughness: 1,
       metalness: 0,
     })
@@ -155,17 +169,47 @@ export class WorldRenderer {
 
     const path = new THREE.Mesh(
       new THREE.PlaneGeometry(6.2, 48, 1, 24),
-      new THREE.MeshStandardMaterial({ color: 0x17201c, roughness: 1 }),
+      new THREE.MeshStandardMaterial({
+        color: 0x526057,
+        emissive: 0x101612,
+        emissiveIntensity: 0.55,
+        roughness: 1,
+      }),
     )
     path.rotation.x = -Math.PI / 2
     path.rotation.z = -0.22
     path.position.set(-2.2, -0.065, 0)
     this.scene.add(path)
+
+    const grassMaterial = new THREE.MeshBasicMaterial({ color: 0x446b4c })
+    const bladeGeometry = new THREE.ConeGeometry(0.045, 0.38, 3)
+    let seed = 0x71a55
+    const random = (): number => {
+      seed = (seed * 1664525 + 1013904223) >>> 0
+      return seed / 0x100000000
+    }
+    for (let i = 0; i < 190; i += 1) {
+      const blade = new THREE.Mesh(bladeGeometry, grassMaterial)
+      blade.position.set((random() * 2 - 1) * 25, 0.1, (random() * 2 - 1) * 25)
+      blade.rotation.y = random() * Math.PI
+      blade.scale.y = 0.55 + random() * 1.4
+      this.scene.add(blade)
+    }
   }
 
   private buildForest(world: WorldState): void {
-    const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x2a241d, roughness: 1 })
-    const crownMaterial = new THREE.MeshStandardMaterial({ color: 0x183126, roughness: 0.96 })
+    const trunkMaterial = new THREE.MeshStandardMaterial({
+      color: 0x604632,
+      emissive: 0x120b06,
+      emissiveIntensity: 0.5,
+      roughness: 1,
+    })
+    const crownMaterial = new THREE.MeshStandardMaterial({
+      color: 0x2c6544,
+      emissive: 0x06150c,
+      emissiveIntensity: 0.72,
+      roughness: 0.96,
+    })
 
     for (const tree of world.trees) {
       const trunk = new THREE.Mesh(
@@ -185,10 +229,15 @@ export class WorldRenderer {
       this.scene.add(crown)
     }
 
-    const stoneMaterial = new THREE.MeshStandardMaterial({ color: 0x343b38, roughness: 0.93 })
-    for (let i = 0; i < 22; i += 1) {
+    const stoneMaterial = new THREE.MeshStandardMaterial({
+      color: 0x68716d,
+      emissive: 0x090b0a,
+      emissiveIntensity: 0.55,
+      roughness: 0.93,
+    })
+    for (let i = 0; i < 28; i += 1) {
       const angle = i * 2.399
-      const radius = 6 + (i % 7) * 2.15
+      const radius = 5 + (i % 8) * 2.15
       const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18 + (i % 3) * 0.1, 0), stoneMaterial)
       stone.position.set(Math.cos(angle) * radius, 0.08, Math.sin(angle) * radius)
       stone.scale.y = 0.55 + (i % 4) * 0.13
@@ -198,11 +247,18 @@ export class WorldRenderer {
 
   private buildPlayer(): void {
     const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0xa9b8b0,
-      roughness: 0.72,
+      color: 0xe2ebe6,
+      emissive: 0x26352e,
+      emissiveIntensity: 0.55,
+      roughness: 0.68,
       metalness: 0.08,
     })
-    const darkMaterial = new THREE.MeshStandardMaterial({ color: 0x202824, roughness: 0.9 })
+    const darkMaterial = new THREE.MeshStandardMaterial({
+      color: 0x607168,
+      emissive: 0x101813,
+      emissiveIntensity: 0.5,
+      roughness: 0.9,
+    })
 
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.4, 1.05, 6), bodyMaterial)
     body.position.y = 0.68
@@ -212,7 +268,7 @@ export class WorldRenderer {
     head.position.y = 1.43
     this.playerGroup.add(head)
 
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.05), bodyMaterial)
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.07, 1.08), bodyMaterial)
     blade.position.set(0.47, 0.82, 0.2)
     blade.rotation.y = -0.34
     this.playerGroup.add(blade)
@@ -223,17 +279,17 @@ export class WorldRenderer {
   private createEnemy(enemy: EnemyState): THREE.Group {
     const group = new THREE.Group()
     const material = new THREE.MeshStandardMaterial({
-      color: 0x4c1b20,
-      emissive: 0x21070a,
-      emissiveIntensity: 0.7,
-      roughness: 0.78,
+      color: 0xb03e48,
+      emissive: 0x5a1018,
+      emissiveIntensity: 1.6,
+      roughness: 0.72,
     })
     const body = new THREE.Mesh(new THREE.ConeGeometry(0.42, 1.45, 5), material)
     body.position.y = 0.72
     group.add(body)
 
-    const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xc8726f })
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 5, 4), eyeMaterial)
+    const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xffaaa3 })
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.09, 5, 4), eyeMaterial)
     eye.position.set(0, 1.12, 0.29)
     group.add(eye)
 
@@ -252,8 +308,8 @@ export class WorldRenderer {
       group.position.set(enemy.x, 0, enemy.z)
       const material = group.userData.bodyMaterial as THREE.MeshStandardMaterial | undefined
       if (material) {
-        material.emissiveIntensity = enemy.hitFlash > 0 ? 4.5 : 0.7
-        material.color.setHex(enemy.hitFlash > 0 ? 0xb65f62 : 0x4c1b20)
+        material.emissiveIntensity = enemy.hitFlash > 0 ? 5.5 : 1.6
+        material.color.setHex(enemy.hitFlash > 0 ? 0xff9b9b : 0xb03e48)
       }
     }
 
@@ -274,7 +330,7 @@ export class WorldRenderer {
     this.playerGroup.position.set(world.player.x, 0, world.player.z)
     this.playerGroup.rotation.y = world.player.facing
     this.playerLight.position.set(world.player.x, 1.8, world.player.z)
-    this.playerLight.intensity = world.player.hurtPulse > 0 ? 7.5 : 5.2
+    this.playerLight.intensity = world.player.hurtPulse > 0 ? 12 : 8.5
 
     this.attackRing.position.set(world.player.x, 0.04, world.player.z)
     const ringMaterial = this.attackRing.material as THREE.MeshBasicMaterial
@@ -282,23 +338,23 @@ export class WorldRenderer {
       const phase = 1 - world.player.attackPulse / 0.34
       const scale = 0.75 + phase * 1.9
       this.attackRing.scale.setScalar(scale)
-      ringMaterial.opacity = Math.max(0, (1 - phase) * 0.55)
+      ringMaterial.opacity = Math.max(0, (1 - phase) * 0.8)
     } else {
       ringMaterial.opacity = THREE.MathUtils.lerp(ringMaterial.opacity, 0, Math.min(1, dt * 16))
     }
   }
 
   private syncCamera(world: WorldState, dt: number): void {
-    const desired = new THREE.Vector3(world.player.x + 7.8, 9.7, world.player.z + 9.8)
-    const smoothing = 1 - Math.exp(-dt * 4.8)
+    const desired = new THREE.Vector3(world.player.x + 7.1, 8.3, world.player.z + 8.9)
+    const smoothing = 1 - Math.exp(-dt * 5.2)
     this.camera.position.lerp(desired, smoothing)
-    this.camera.lookAt(world.player.x, 0.72, world.player.z)
+    this.camera.lookAt(world.player.x, 0.68, world.player.z)
   }
 
   private drawGlyphFrame(seconds: number): void {
     const cellW = this.width / this.cols
     const cellH = this.height / this.rows
-    const fontSize = Math.ceil(cellH * 1.08)
+    const fontSize = Math.max(9, Math.ceil(cellH * 1.18))
 
     this.ctx.fillStyle = '#000'
     this.ctx.fillRect(0, 0, this.width, this.height)
@@ -310,39 +366,52 @@ export class WorldRenderer {
       const sourceY = this.rows - 1 - gy
       for (let gx = 0; gx < this.cols; gx += 1) {
         const index = (sourceY * this.cols + gx) * 4
-        const r = this.pixels[index] ?? 0
-        const g = this.pixels[index + 1] ?? 0
-        const b = this.pixels[index + 2] ?? 0
-        const luminance = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255
-        if (luminance < 0.045) continue
+        const rawR = this.pixels[index] ?? 0
+        const rawG = this.pixels[index + 1] ?? 0
+        const rawB = this.pixels[index + 2] ?? 0
 
-        const rampPosition = Math.min(GLYPH_RAMP.length - 1, Math.floor(Math.pow(luminance, 0.72) * GLYPH_RAMP.length))
+        const r = toDisplayChannel(rawR)
+        const g = toDisplayChannel(rawG)
+        const b = toDisplayChannel(rawB)
+        const luminance = (r * 0.2126 + g * 0.7152 + b * 0.0722) / 255
+        const maxChannel = Math.max(r, g, b) / 255
+
+        if (luminance < 0.018 && maxChannel < 0.035) continue
+
+        const liftedLuminance = clamp01((luminance - 0.012) * 1.55)
+        const rampPosition = Math.min(
+          GLYPH_RAMP.length - 1,
+          Math.max(0, Math.floor(Math.pow(liftedLuminance, 0.78) * GLYPH_RAMP.length)),
+        )
+
         let glyph = GLYPH_RAMP[rampPosition] ?? '.'
-        if (rampPosition >= 4 && rampPosition <= 6) {
-          const selector = (gx * 17 + gy * 31 + Math.floor(seconds * 0.7)) % 3
-          glyph = selector === 0 ? '/' : selector === 1 ? '\\' : '|'
+        if (rampPosition >= 3 && rampPosition <= 6) {
+          const selector = (gx * 17 + gy * 31 + Math.floor(seconds * 0.35)) % 4
+          glyph = selector === 0 ? '/' : selector === 1 ? '\\' : selector === 2 ? '|' : ':'
         }
 
-        const boost = 1.18 + luminance * 0.3
-        const rr = Math.min(255, Math.round(r * boost + 4))
-        const gg = Math.min(255, Math.round(g * boost + 6))
-        const bb = Math.min(255, Math.round(b * boost + 5))
+        const floor = 20 + liftedLuminance * 12
+        const rr = Math.min(255, Math.round(r * 1.12 + floor))
+        const gg = Math.min(255, Math.round(g * 1.16 + floor))
+        const bb = Math.min(255, Math.round(b * 1.12 + floor))
+        this.ctx.globalAlpha = 0.56 + liftedLuminance * 0.44
         this.ctx.fillStyle = `rgb(${rr}, ${gg}, ${bb})`
         this.ctx.fillText(glyph, (gx + 0.5) * cellW, (gy + 0.5) * cellH)
       }
     }
 
+    this.ctx.globalAlpha = 1
     const vignette = this.ctx.createRadialGradient(
       this.width * 0.5,
       this.height * 0.5,
-      Math.min(this.width, this.height) * 0.24,
+      Math.min(this.width, this.height) * 0.3,
       this.width * 0.5,
       this.height * 0.5,
-      Math.max(this.width, this.height) * 0.72,
+      Math.max(this.width, this.height) * 0.78,
     )
     vignette.addColorStop(0, 'rgba(0,0,0,0)')
-    vignette.addColorStop(0.72, 'rgba(0,0,0,.08)')
-    vignette.addColorStop(1, 'rgba(0,0,0,.72)')
+    vignette.addColorStop(0.78, 'rgba(0,0,0,.025)')
+    vignette.addColorStop(1, 'rgba(0,0,0,.26)')
     this.ctx.fillStyle = vignette
     this.ctx.fillRect(0, 0, this.width, this.height)
   }
