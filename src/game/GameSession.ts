@@ -77,6 +77,10 @@ export class GameSession {
     this.lastTime = now
     this.accumulator = Math.min(0.15, this.accumulator + frameDt)
 
+    if (this.input.consumeTorchToggle()) this.world.toggleTorch()
+    if (this.input.consumeMacroZoom()) this.renderer.toggleMacroZoom()
+    this.renderer.adjustZoom(this.input.consumeZoomDelta())
+
     const movement = this.input.movement()
     let attack = this.input.consumeAttack()
 
