@@ -1,33 +1,34 @@
 import { createRandom } from './seededRandom'
 
-type GlyphNode = {
+type GlyphParticle = {
   x: number
   y: number
   glyph: string
-  alpha: number
   size: number
-  layer: number
-  tint: number
-  sway: number
-}
-
-type Firefly = {
-  x: number
-  y: number
-  phase: number
+  alpha: number
   speed: number
-  radius: number
+  phase: number
+  depth: number
 }
 
-const GLYPHS = ['/', '\\', '|', ':', ';', '·', '.', ',', '^', 'v', 'Y', 'T', '†', '*']
+type GlyphStream = {
+  x: number
+  width: number
+  speed: number
+  offset: number
+  alpha: number
+}
+
+const GLYPHS = ['/', '\\', '|', ':', ';', '.', '·', '+', '-', '=', '<', '>', '[', ']', '{', '}', '0', '1']
+const STREAM_GLYPHS = '/\\|:;.=+-<>[]{}01'
 
 export class GlyphBackdrop {
   readonly element: HTMLCanvasElement
 
   private readonly ctx: CanvasRenderingContext2D
-  private readonly nodes: GlyphNode[] = []
-  private readonly fireflies: Firefly[] = []
   private readonly random = createRandom(0xa5c11)
+  private readonly particles: GlyphParticle[] = []
+  private readonly streams: GlyphStream[] = []
   private frame = 0
   private width = 0
   private height = 0
@@ -38,7 +39,7 @@ export class GlyphBackdrop {
   private pointerY = 0
   private reducedMotion = false
   private ambientMotionEnabled = true
-  private resizeObserver: ResizeObserver
+  private readonly resizeObserver: ResizeObserver
 
   constructor(parent: HTMLElement) {
     this.element = document.createElement('canvas')
@@ -46,12 +47,10 @@ export class GlyphBackdrop {
     this.element.setAttribute('aria-hidden', 'true')
 
     const context = this.element.getContext('2d', { alpha: false })
-    if (!context) {
-      throw new Error('2D canvas is unavailable')
-    }
+    if (!context) throw new Error('2D canvas is unavailable')
     this.ctx = context
-    parent.prepend(this.element)
 
+    parent.prepend(this.element)
     this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     window.addEventListener('pointermove', this.handlePointer, { passive: true })
 
@@ -83,196 +82,167 @@ export class GlyphBackdrop {
 
     this.width = Math.max(1, rect.width)
     this.height = Math.max(1, rect.height)
-    this.dpr = Math.min(window.devicePixelRatio || 1, 1.6)
-
+    this.dpr = Math.min(window.devicePixelRatio || 1, 1.7)
     this.element.width = Math.floor(this.width * this.dpr)
     this.element.height = Math.floor(this.height * this.dpr)
     this.element.style.width = `${this.width}px`
     this.element.style.height = `${this.height}px`
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
-
-    this.rebuildField()
+    this.rebuild()
   }
 
-  private rebuildField(): void {
-    this.nodes.length = 0
-    this.fireflies.length = 0
+  private rebuild(): void {
+    this.particles.length = 0
+    this.streams.length = 0
 
     const area = this.width * this.height
-    const count = Math.min(2300, Math.max(750, Math.floor(area / 900)))
+    const count = Math.min(720, Math.max(280, Math.floor(area / 2600)))
 
-    for (let i = 0; i < count; i += 1) {
-      const layer = this.random() ** 1.4
-      const yBias = Math.pow(this.random(), 0.58)
-      const y = this.height * (0.22 + yBias * 0.88)
-      const horizonFade = Math.max(0, Math.min(1, (y - this.height * 0.2) / (this.height * 0.62)))
-      const size = 9 + layer * 8 + this.random() * 4
-
-      this.nodes.push({
+    for (let index = 0; index < count; index += 1) {
+      const depth = 0.25 + this.random() * 0.75
+      this.particles.push({
         x: this.random() * this.width,
-        y,
+        y: this.random() * this.height,
         glyph: GLYPHS[Math.floor(this.random() * GLYPHS.length)] ?? '.',
-        alpha: (0.10 + layer * 0.48) * horizonFade,
-        size,
-        layer,
-        tint: this.random(),
-        sway: this.random() * Math.PI * 2,
+        size: 8 + this.random() * 8 + depth * 4,
+        alpha: 0.035 + this.random() * 0.18,
+        speed: 4 + this.random() * 11,
+        phase: this.random() * Math.PI * 2,
+        depth,
       })
     }
 
-    const fireflyCount = Math.max(9, Math.floor(this.width / 120))
-    for (let i = 0; i < fireflyCount; i += 1) {
-      this.fireflies.push({
-        x: this.width * (0.32 + this.random() * 0.64),
-        y: this.height * (0.2 + this.random() * 0.62),
-        phase: this.random() * Math.PI * 2,
-        speed: 0.35 + this.random() * 0.65,
-        radius: 0.8 + this.random() * 1.4,
+    const streamCount = Math.max(5, Math.min(11, Math.floor(this.width / 170)))
+    for (let index = 0; index < streamCount; index += 1) {
+      this.streams.push({
+        x: this.width * (0.08 + this.random() * 0.84),
+        width: 24 + this.random() * 72,
+        speed: 12 + this.random() * 26,
+        offset: this.random() * this.height,
+        alpha: 0.035 + this.random() * 0.08,
       })
     }
   }
 
   private render = (timestamp: number): void => {
-    const seconds = this.ambientMotionEnabled ? timestamp * 0.001 : 0
-    this.pointerX += (this.targetPointerX - this.pointerX) * 0.035
-    this.pointerY += (this.targetPointerY - this.pointerY) * 0.035
+    const seconds = this.ambientMotionEnabled && !this.reducedMotion ? timestamp * 0.001 : 0
+    this.pointerX += (this.targetPointerX - this.pointerX) * 0.04
+    this.pointerY += (this.targetPointerY - this.pointerY) * 0.04
 
-    this.drawSky()
-    this.drawMoon(seconds)
-    this.drawHills(seconds)
-    this.drawGlyphForest(seconds)
-    this.drawFog(seconds)
-    this.drawFireflies(seconds)
+    this.ctx.fillStyle = '#000000'
+    this.ctx.fillRect(0, 0, this.width, this.height)
+
+    this.drawAmbientField(seconds)
+    this.drawStreams(seconds)
+    this.drawOrbit(seconds)
+    this.drawFaultLines(seconds)
     this.drawVignette()
 
     this.frame = requestAnimationFrame(this.render)
   }
 
-  private drawSky(): void {
-    const gradient = this.ctx.createLinearGradient(0, 0, 0, this.height)
-    gradient.addColorStop(0, '#071114')
-    gradient.addColorStop(0.48, '#0a1212')
-    gradient.addColorStop(1, '#030506')
-    this.ctx.fillStyle = gradient
-    this.ctx.fillRect(0, 0, this.width, this.height)
-  }
-
-  private drawMoon(seconds: number): void {
-    const x = this.width * 0.73 + this.pointerX * 10
-    const y = this.height * 0.19 + this.pointerY * 6
-    const pulse = this.reducedMotion ? 1 : 0.96 + Math.sin(seconds * 0.45) * 0.04
-    const radius = Math.min(this.width, this.height) * 0.055 * pulse
-
-    const halo = this.ctx.createRadialGradient(x, y, 0, x, y, radius * 5.5)
-    halo.addColorStop(0, 'rgba(205, 232, 220, .22)')
-    halo.addColorStop(0.25, 'rgba(141, 183, 170, .08)')
-    halo.addColorStop(1, 'rgba(40, 74, 67, 0)')
-    this.ctx.fillStyle = halo
-    this.ctx.beginPath()
-    this.ctx.arc(x, y, radius * 5.5, 0, Math.PI * 2)
-    this.ctx.fill()
-
-    this.ctx.fillStyle = 'rgba(217, 234, 223, .76)'
-    this.ctx.beginPath()
-    this.ctx.arc(x, y, radius, 0, Math.PI * 2)
-    this.ctx.fill()
-
-    this.ctx.fillStyle = 'rgba(6, 13, 14, .24)'
-    this.ctx.beginPath()
-    this.ctx.arc(x - radius * 0.23, y - radius * 0.14, radius * 0.17, 0, Math.PI * 2)
-    this.ctx.arc(x + radius * 0.25, y + radius * 0.19, radius * 0.11, 0, Math.PI * 2)
-    this.ctx.fill()
-  }
-
-  private drawHills(seconds: number): void {
-    const layers = [
-      { y: 0.49, amp: 0.055, alpha: 0.75, speed: 0.025 },
-      { y: 0.59, amp: 0.07, alpha: 0.88, speed: 0.04 },
-      { y: 0.70, amp: 0.045, alpha: 1, speed: 0.06 },
-    ]
-
-    for (let layer = 0; layer < layers.length; layer += 1) {
-      const entry = layers[layer]
-      if (!entry) continue
-      const parallax = this.pointerX * (layer + 1) * 6
-      this.ctx.beginPath()
-      this.ctx.moveTo(-30, this.height)
-
-      for (let x = -30; x <= this.width + 30; x += 18) {
-        const nx = (x + parallax) / Math.max(1, this.width)
-        const wave = Math.sin(nx * 8.4 + layer * 1.7 + seconds * entry.speed) * entry.amp
-        const wave2 = Math.sin(nx * 17.8 + layer * 2.8) * entry.amp * 0.38
-        const y = this.height * (entry.y + wave + wave2)
-        this.ctx.lineTo(x, y)
-      }
-
-      this.ctx.lineTo(this.width + 30, this.height)
-      this.ctx.closePath()
-      this.ctx.fillStyle = `rgba(${5 + layer * 2}, ${12 + layer * 5}, ${11 + layer * 4}, ${entry.alpha})`
-      this.ctx.fill()
-    }
-  }
-
-  private drawGlyphForest(seconds: number): void {
+  private drawAmbientField(seconds: number): void {
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
 
-    for (const node of this.nodes) {
-      const drift = this.reducedMotion ? 0 : Math.sin(seconds * (0.15 + node.layer * 0.55) + node.sway) * (0.6 + node.layer * 1.2)
-      const parallaxX = this.pointerX * 14 * node.layer
-      const parallaxY = this.pointerY * 8 * node.layer
-      const x = node.x + parallaxX + drift
-      const y = node.y + parallaxY
-      if (x < -20 || x > this.width + 20 || y < -20 || y > this.height + 30) continue
+    for (const particle of this.particles) {
+      const driftX = Math.sin(seconds * 0.22 + particle.phase) * 7 * particle.depth
+      const driftY = ((seconds * particle.speed + particle.phase * 40) % (this.height + 80)) - 40
+      const x = particle.x + driftX + this.pointerX * 11 * particle.depth
+      const y = (particle.y + driftY * 0.12 + this.pointerY * 7 * particle.depth + this.height) % this.height
+      const pulse = 0.72 + Math.sin(seconds * 0.75 + particle.phase) * 0.28
 
-      const warm = node.tint > 0.93
-      const color = warm ? '176, 161, 104' : node.tint > 0.58 ? '113, 146, 128' : '77, 108, 95'
-      this.ctx.fillStyle = `rgba(${color}, ${node.alpha})`
-      this.ctx.font = `${Math.round(node.size)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
-      this.ctx.fillText(node.glyph, x, y)
+      this.ctx.font = `${Math.round(particle.size)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+      this.ctx.fillStyle = `rgba(206, 218, 214, ${particle.alpha * pulse})`
+      this.ctx.fillText(particle.glyph, x, y)
     }
   }
 
-  private drawFog(seconds: number): void {
-    for (let i = 0; i < 4; i += 1) {
-      const phase = this.reducedMotion ? i : (seconds * (6 + i * 2) + i * 210) % (this.width + 500)
-      const x = phase - 250
-      const y = this.height * (0.44 + i * 0.095)
-      const gradient = this.ctx.createRadialGradient(x, y, 0, x, y, 260 + i * 50)
-      gradient.addColorStop(0, 'rgba(126, 151, 139, .035)')
-      gradient.addColorStop(1, 'rgba(80, 100, 92, 0)')
-      this.ctx.fillStyle = gradient
-      this.ctx.fillRect(x - 330, y - 120, 660, 240)
+  private drawStreams(seconds: number): void {
+    this.ctx.textAlign = 'center'
+    this.ctx.textBaseline = 'middle'
+    this.ctx.font = '11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+
+    for (let streamIndex = 0; streamIndex < this.streams.length; streamIndex += 1) {
+      const stream = this.streams[streamIndex]
+      if (!stream) continue
+
+      for (let row = -3; row < Math.ceil(this.height / 22) + 3; row += 1) {
+        const travel = seconds * stream.speed + stream.offset
+        const y = ((row * 22 + travel) % (this.height + 88)) - 44
+        const bend = Math.sin(y * 0.012 + streamIndex * 1.7 + seconds * 0.3) * stream.width
+        const x = stream.x + bend + this.pointerX * 4
+        const glyphIndex = Math.abs(Math.floor(row * 7 + streamIndex * 11 + seconds * 3)) % STREAM_GLYPHS.length
+        const glyph = STREAM_GLYPHS[glyphIndex] ?? ':'
+        const fade = Math.max(0.15, 1 - Math.abs(y - this.height * 0.5) / (this.height * 0.62))
+
+        this.ctx.fillStyle = `rgba(225, 233, 230, ${stream.alpha * fade})`
+        this.ctx.fillText(glyph, x, y)
+      }
     }
   }
 
-  private drawFireflies(seconds: number): void {
-    for (const firefly of this.fireflies) {
-      const motion = this.reducedMotion ? 0 : Math.sin(seconds * firefly.speed + firefly.phase)
-      const x = firefly.x + motion * 13 + this.pointerX * 4
-      const y = firefly.y + Math.cos(seconds * firefly.speed * 0.7 + firefly.phase) * 7
-      const alpha = 0.12 + (Math.sin(seconds * firefly.speed * 2 + firefly.phase) + 1) * 0.14
+  private drawOrbit(seconds: number): void {
+    const centerX = this.width * 0.73 + this.pointerX * 13
+    const centerY = this.height * 0.48 + this.pointerY * 9
+    const radiusX = Math.min(this.width * 0.21, 250)
+    const radiusY = Math.min(this.height * 0.28, 210)
+    const count = this.width < 720 ? 34 : 54
 
-      this.ctx.fillStyle = `rgba(199, 207, 139, ${alpha})`
-      this.ctx.beginPath()
-      this.ctx.arc(x, y, firefly.radius, 0, Math.PI * 2)
-      this.ctx.fill()
+    this.ctx.textAlign = 'center'
+    this.ctx.textBaseline = 'middle'
+    this.ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+
+    for (let index = 0; index < count; index += 1) {
+      const angle = (index / count) * Math.PI * 2 + seconds * 0.08
+      const x = centerX + Math.cos(angle) * radiusX
+      const y = centerY + Math.sin(angle) * radiusY
+      const glyph = STREAM_GLYPHS[(index * 3) % STREAM_GLYPHS.length] ?? '/'
+      const alpha = 0.045 + (Math.sin(angle * 3 + seconds) + 1) * 0.025
+      this.ctx.fillStyle = `rgba(233, 239, 237, ${alpha})`
+      this.ctx.fillText(glyph, x, y)
+    }
+
+    const innerCount = 18
+    for (let index = 0; index < innerCount; index += 1) {
+      const angle = (index / innerCount) * Math.PI * 2 - seconds * 0.12
+      const x = centerX + Math.cos(angle) * radiusX * 0.48
+      const y = centerY + Math.sin(angle) * radiusY * 0.48
+      this.ctx.fillStyle = 'rgba(195, 205, 202, .05)'
+      this.ctx.fillText(index % 2 === 0 ? '/' : '\\', x, y)
+    }
+  }
+
+  private drawFaultLines(seconds: number): void {
+    const activation = (Math.sin(seconds * 0.47) + 1) * 0.5
+    if (activation < 0.76) return
+
+    this.ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+    this.ctx.textAlign = 'left'
+    const y = this.height * (0.18 + ((Math.sin(seconds * 0.21) + 1) * 0.32))
+    const x = this.width * 0.54
+    const fragments = ['////', '::', '00', '||', '[]', '..', '=/=', '\\\\']
+
+    for (let index = 0; index < 8; index += 1) {
+      const offset = index * 38 + Math.sin(seconds * 2 + index) * 8
+      this.ctx.fillStyle = `rgba(235, 240, 238, ${0.025 + activation * 0.04})`
+      this.ctx.fillText(fragments[index % fragments.length] ?? '//', x + offset, y + (index % 2) * 7)
     }
   }
 
   private drawVignette(): void {
-    const vignette = this.ctx.createRadialGradient(
-      this.width * 0.52,
-      this.height * 0.45,
-      Math.min(this.width, this.height) * 0.15,
-      this.width * 0.52,
-      this.height * 0.45,
-      Math.max(this.width, this.height) * 0.72,
+    const gradient = this.ctx.createRadialGradient(
+      this.width * 0.5,
+      this.height * 0.5,
+      Math.min(this.width, this.height) * 0.1,
+      this.width * 0.5,
+      this.height * 0.5,
+      Math.max(this.width, this.height) * 0.76,
     )
-    vignette.addColorStop(0, 'rgba(0,0,0,0)')
-    vignette.addColorStop(0.68, 'rgba(0,0,0,.18)')
-    vignette.addColorStop(1, 'rgba(0,0,0,.78)')
-    this.ctx.fillStyle = vignette
+    gradient.addColorStop(0, 'rgba(0,0,0,0)')
+    gradient.addColorStop(0.66, 'rgba(0,0,0,.18)')
+    gradient.addColorStop(1, 'rgba(0,0,0,.82)')
+    this.ctx.fillStyle = gradient
     this.ctx.fillRect(0, 0, this.width, this.height)
   }
 
