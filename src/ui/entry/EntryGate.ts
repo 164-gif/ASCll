@@ -3,13 +3,13 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => window.set
 export class EntryGate {
   readonly element: HTMLElement
 
-  private readonly button: HTMLButtonElement
+  private readonly disclaimer: HTMLElement
+  private readonly prompt: HTMLElement
   private entered = false
   private resolveEntry: (() => void) | null = null
   private onEnter: (() => void) | null = null
 
   private readonly handleKeydown = (event: KeyboardEvent): void => {
-    if (event.key !== 'Enter' && event.key !== ' ') return
     event.preventDefault()
     this.activate()
   }
@@ -21,36 +21,35 @@ export class EntryGate {
   constructor(parent: HTMLElement) {
     this.element = document.createElement('section')
     this.element.className = 'entry-gate'
-    this.element.setAttribute('aria-label', 'Вход в игру')
+    this.element.setAttribute('aria-label', 'Дисклеймер')
     this.element.innerHTML = `
-      <div class="entry-gate__axis" aria-hidden="true"></div>
       <div class="entry-gate__center">
-        <div class="entry-gate__mark" aria-hidden="true"><span>a</span></div>
-        <p class="entry-gate__name">ASCII</p>
-        <button class="entry-gate__enter" type="button">
-          <span>войти</span>
-          <i aria-hidden="true"></i>
-        </button>
-        <p class="entry-gate__hint">касание / enter · звук включится после входа</p>
-      </div>
-      <div class="entry-gate__footer" aria-hidden="true">
-        <span>signal 00</span>
-        <span>pre-alpha</span>
+        <p class="entry-gate__disclaimer" aria-label="Игра является художественным вымыслом. Персонажи, события и места придуманы; любые совпадения случайны."></p>
+        <p class="entry-gate__enter" aria-label="Нажмите на любую кнопку"></p>
       </div>
     `
 
-    const button = this.element.querySelector<HTMLButtonElement>('.entry-gate__enter')
-    if (!button) throw new Error('Entry button is unavailable')
-    this.button = button
+    const disclaimer = this.element.querySelector<HTMLElement>('.entry-gate__disclaimer')
+    const prompt = this.element.querySelector<HTMLElement>('.entry-gate__enter')
+    if (!disclaimer || !prompt) throw new Error('Disclaimer text is unavailable')
+    this.disclaimer = disclaimer
+    this.prompt = prompt
     parent.append(this.element)
   }
 
   async wait(onEnter: () => void): Promise<void> {
     this.onEnter = onEnter
-    this.button.addEventListener('click', this.handlePointer)
-    window.addEventListener('keydown', this.handleKeydown, { passive: false })
     requestAnimationFrame(() => this.element.classList.add('entry-gate--ready'))
-    window.setTimeout(() => this.button.focus({ preventScroll: true }), 120)
+    await this.animateText(
+      this.disclaimer,
+      'Игра является художественным вымыслом. Персонажи, события и места придуманы; любые совпадения случайны.',
+      3000,
+    )
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 350))
+    await this.animateText(this.prompt, 'Нажмите на любую кнопку', 1500)
+
+    window.addEventListener('pointerdown', this.handlePointer, { once: true })
+    window.addEventListener('keydown', this.handleKeydown, { passive: false })
 
     await new Promise<void>((resolve) => {
       this.resolveEntry = resolve
@@ -62,11 +61,37 @@ export class EntryGate {
   }
 
   destroy(): void {
-    this.button.removeEventListener('click', this.handlePointer)
+    window.removeEventListener('pointerdown', this.handlePointer)
     window.removeEventListener('keydown', this.handleKeydown)
     this.resolveEntry = null
     this.onEnter = null
     this.element.remove()
+  }
+
+  private animateText(element: HTMLElement, message: string, duration: number): Promise<void> {
+    const alphabet = 'АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯ0123456789'
+    const startedAt = performance.now()
+
+    return new Promise((resolve) => {
+      const tick = (now: number): void => {
+        const progress = Math.min(1, (now - startedAt) / duration)
+        const lockedCount = Math.floor(progress * message.length)
+        element.textContent = Array.from(message, (character, index) => {
+          if (character === ' ' || index < lockedCount) return character
+          return alphabet[Math.floor(Math.random() * alphabet.length)] ?? character
+        }).join('')
+
+        if (progress >= 1) {
+          element.textContent = message
+          resolve()
+          return
+        }
+
+        requestAnimationFrame(tick)
+      }
+
+      requestAnimationFrame(tick)
+    })
   }
 
   private activate(): void {
@@ -74,7 +99,6 @@ export class EntryGate {
     this.entered = true
     this.onEnter?.()
     this.element.classList.add('entry-gate--accepted')
-    this.button.disabled = true
     this.resolveEntry?.()
   }
 }

@@ -6,7 +6,6 @@ type AudioScene = 'menu' | 'world'
 type Surface = 'grass' | 'water' | 'stone'
 
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
-const TAU = Math.PI * 2
 
 export class AudioDirector {
   private readonly store = new AudioSettings()
@@ -21,11 +20,11 @@ export class AudioDirector {
   private worldSceneGain: GainNode | null = null
   private riverGain: GainNode | null = null
   private windGain: GainNode | null = null
-  private grassGain: GainNode | null = null
   private fireGain: GainNode | null = null
   private dangerGain: GainNode | null = null
   private noiseBuffer: AudioBuffer | null = null
   private menuScoreBuffer: AudioBuffer | null = null
+  private menuScoreLoad: Promise<void> | null = null
   private menuScoreSource: AudioBufferSourceNode | null = null
   private menuScoreStartedAt = 0
   private menuScoreOffset = 0
@@ -61,6 +60,7 @@ export class AudioDirector {
 
     if (context.state === 'suspended') await context.resume()
     this.applySettings(true)
+    await this.loadMenuScore()
     if (this.scene === 'menu') this.startMenuScore()
   }
 
@@ -168,9 +168,6 @@ export class AudioDirector {
     const windBreath = 0.78 + Math.sin(world.elapsed * 0.19) * 0.16 + Math.sin(world.elapsed * 0.071) * 0.08
     this.setTarget(this.windGain, windBase * windBreath, 0.7)
 
-    const moving = clamp01(speed / 5.4)
-    const grassAmount = inWater || onBridge ? 0 : moving * (zone === 'meadow' ? 0.18 : zone === 'forest' ? 0.14 : 0.09)
-    this.setTarget(this.grassGain, grassAmount, 0.08)
     this.setTarget(this.fireGain, world.torchOn ? 0.035 : 0, 0.16)
 
     let nearestEnemy = Number.POSITIVE_INFINITY
@@ -244,11 +241,9 @@ export class AudioDirector {
     this.effectsGain = effectsGain
     this.worldSceneGain = worldSceneGain
     this.noiseBuffer = this.createNoiseBuffer(context, 7)
-    this.menuScoreBuffer = this.createMenuScoreBuffer()
 
     this.riverGain = this.createLoopingNoise(worldSceneGain, 'lowpass', 1900, 0.72)
     this.windGain = this.createLoopingNoise(worldSceneGain, 'bandpass', 520, 0.55)
-    this.grassGain = this.createLoopingNoise(worldSceneGain, 'highpass', 2200, 0.3)
     this.fireGain = this.createLoopingNoise(worldSceneGain, 'bandpass', 3600, 1.2)
 
     const dangerGain = context.createGain()
@@ -271,90 +266,28 @@ export class AudioDirector {
     this.applySettings(true)
   }
 
-  private createMenuScoreBuffer(): AudioBuffer {
+  private async loadMenuScore(): Promise<void> {
+    if (this.menuScoreBuffer) return
+    if (this.menuScoreLoad) return this.menuScoreLoad
+
     const context = this.context
-    if (!context) throw new Error('Audio context is not ready')
+    if (!context) return
 
-    const sampleRate = 22050
-    const duration = 28
-    const frames = sampleRate * duration
-    const buffer = context.createBuffer(2, frames, sampleRate)
-    const left = buffer.getChannelData(0)
-    const right = buffer.getChannelData(1)
-    const chords = [
-      [110, 164.81, 261.63],
-      [87.31, 130.81, 220],
-      [98, 146.83, 246.94],
-      [82.41, 123.47, 196],
-    ] as const
-    const piano = [
-      [1.6, 220],
-      [4.9, 261.63],
-      [8.7, 196],
-      [12.2, 164.81],
-      [16.8, 220],
-      [20.4, 293.66],
-      [23.6, 246.94],
-    ] as const
+    this.menuScoreLoad = fetch(new URL('../../measured_in_pale_glass.mp3', import.meta.url))
+      .then((response) => {
+        if (!response.ok) throw new Error(`Menu music request failed: ${response.status}`)
+        return response.arrayBuffer()
+      })
+      .then((audioData) => context.decodeAudioData(audioData))
+      .then((buffer) => {
+        if (this.context === context) this.menuScoreBuffer = buffer
+      })
+      .catch((error: unknown) => {
+        this.menuScoreLoad = null
+        console.error('Could not load menu music.', error)
+      })
 
-    for (let frame = 0; frame < frames; frame += 1) {
-      const t = frame / sampleRate
-      const edge = Math.min(clamp01(t / 2.6), clamp01((duration - t) / 3.4))
-      const section = Math.min(chords.length - 1, Math.floor(t / 7))
-      const chord = chords[section] ?? chords[0]
-      let padL = 0
-      let padR = 0
-
-      for (let voice = 0; voice < chord.length; voice += 1) {
-        const frequency = chord[voice] ?? 110
-        const vibrato = Math.sin(TAU * (0.17 + voice * 0.035) * t + voice) * 0.0028
-        const phaseL = TAU * frequency * (1 + vibrato) * t
-        const phaseR = TAU * frequency * (1 - vibrato * 0.7) * t + voice * 0.19
-        const toneL = Math.sin(phaseL) + Math.sin(phaseL * 2.003) * 0.12 + Math.sin(phaseL * 3.01) * 0.035
-        const toneR = Math.sin(phaseR) + Math.sin(phaseR * 1.997) * 0.12 + Math.sin(phaseR * 3.005) * 0.035
-        const weight = voice === 0 ? 0.045 : voice === 1 ? 0.029 : 0.018
-        padL += toneL * weight
-        padR += toneR * weight
-      }
-
-      const breath = 0.72 + Math.sin(TAU * 0.033 * t) * 0.15 + Math.sin(TAU * 0.071 * t + 1.4) * 0.07
-      padL *= edge * breath
-      padR *= edge * (breath * 0.97 + 0.015)
-
-      let keysL = 0
-      let keysR = 0
-      for (let noteIndex = 0; noteIndex < piano.length; noteIndex += 1) {
-        const note = piano[noteIndex]
-        if (!note) continue
-        const [start, frequency] = note
-        const age = t - start
-        if (age < 0 || age > 5.2) continue
-        const attack = clamp01(age / 0.025)
-        const decay = Math.exp(-age * 0.72)
-        const envelope = attack * decay * edge
-        const body = Math.sin(TAU * frequency * age) * 0.068
-          + Math.sin(TAU * frequency * 2.01 * age + 0.16) * 0.026
-          + Math.sin(TAU * frequency * 3.98 * age) * 0.008
-        const pan = noteIndex % 2 === 0 ? 0.82 : 1.05
-        keysL += body * envelope * pan
-        keysR += body * envelope * (1.9 - pan)
-      }
-
-      const air = (Math.random() * 2 - 1) * 0.0015 * edge * (0.35 + breath * 0.4)
-      left[frame] = Math.tanh((padL + keysL + air) * 1.6) * 0.72
-      right[frame] = Math.tanh((padR + keysR - air * 0.5) * 1.6) * 0.72
-    }
-
-    this.applyTinyReverb(left, sampleRate, 0.19, 0.22)
-    this.applyTinyReverb(right, sampleRate, 0.23, 0.2)
-    return buffer
-  }
-
-  private applyTinyReverb(channel: Float32Array, sampleRate: number, seconds: number, feedback: number): void {
-    const delay = Math.max(1, Math.floor(sampleRate * seconds))
-    for (let index = delay; index < channel.length; index += 1) {
-      channel[index] += (channel[index - delay] ?? 0) * feedback
-    }
+    return this.menuScoreLoad
   }
 
   private startMenuScore(): void {
@@ -443,19 +376,16 @@ export class AudioDirector {
 
   private playFootstep(surface: Surface, running: boolean): void {
     if (surface === 'water') {
-      this.playNoiseBurst(running ? 0.16 : 0.12, running ? 0.055 : 0.04, 920, 'lowpass')
-      this.playTone(92, 68, 0.08, running ? 0.022 : 0.016, 'sine')
+      this.playTone(92, 68, 0.08, running ? 0.012 : 0.009, 'sine')
       return
     }
 
     if (surface === 'stone') {
-      this.playNoiseBurst(0.055, running ? 0.028 : 0.021, 2500, 'bandpass')
-      this.playTone(170, 105, 0.055, running ? 0.018 : 0.012, 'triangle')
+      this.playTone(170, 105, 0.055, running ? 0.012 : 0.008, 'triangle')
       return
     }
 
-    this.playNoiseBurst(0.085, running ? 0.035 : 0.026, 1650, 'bandpass')
-    this.playNoiseBurst(0.04, 0.012, 4300, 'highpass', 0.018)
+    this.playTone(115, 72, 0.075, running ? 0.01 : 0.007, 'sine')
   }
 
   private playSword(): void {

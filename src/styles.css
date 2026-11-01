@@ -81,18 +81,6 @@ button { -webkit-tap-highlight-color: transparent; }
   text-transform: lowercase;
 }
 
-.boot-focus {
-  position: absolute;
-  left: 50%;
-  top: calc(50% + 78px);
-  transform: translateX(-50%);
-  color: #6c716f;
-  font-size: 8px;
-  letter-spacing: .32em;
-  opacity: 0;
-  transition: opacity 680ms ease;
-}
-
 .boot-readout--cinematic {
   position: absolute;
   left: clamp(22px, 5vw, 78px);

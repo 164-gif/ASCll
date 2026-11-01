@@ -88,57 +88,6 @@
   transform: translate(-50%, -50%) translateY(-3px);
 }
 
-.boot-focus {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: min(520px, 80vw);
-  display: grid;
-  place-items: center;
-  gap: 10px;
-  opacity: 0;
-  text-align: center;
-  transform: translate(-50%, -50%) scale(.97);
-  transition: opacity 260ms ease, transform 700ms cubic-bezier(.16,.8,.2,1), filter 240ms ease;
-}
-
-.boot-focus::before,
-.boot-focus::after {
-  content: "";
-  width: min(290px, 54vw);
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(229,237,234,.25), transparent);
-}
-
-.boot-sequence--locked .boot-focus {
-  transform: translate(-50%, -50%) scale(1);
-}
-
-.boot-focus__eyebrow {
-  margin-top: 7px;
-  color: rgba(226,234,231,.47);
-  font-size: 7px;
-  letter-spacing: .62em;
-}
-
-.boot-focus__title {
-  color: rgba(239,243,241,.94);
-  font-size: clamp(11px, 1.05vw, 15px);
-  font-weight: 400;
-  letter-spacing: .48em;
-  text-indent: .48em;
-  text-shadow: 0 0 20px rgba(235,242,239,.12);
-}
-
-.boot-focus__meta {
-  max-width: 410px;
-  color: rgba(191,201,197,.32);
-  font-size: 7px;
-  line-height: 1.8;
-  letter-spacing: .18em;
-  text-transform: uppercase;
-}
-
 .boot-readout.boot-readout--cinematic {
   position: absolute;
   left: 50%;
@@ -193,7 +142,6 @@
 }
 
 .boot-sequence--blackout .boot-prelude,
-.boot-sequence--blackout .boot-focus,
 .boot-sequence--blackout .boot-readout,
 .boot-sequence--blackout .boot-progress,
 .boot-sequence--blackout .boot-sequence__stamp,
@@ -241,9 +189,6 @@
 
 @media (max-width: 700px) {
   .boot-prelude { top: 33%; }
-  .boot-focus { top: 48%; }
-  .boot-focus__title { font-size: 11px; letter-spacing: .34em; text-indent: .34em; }
-  .boot-focus__meta { max-width: 76vw; font-size: 6px; }
   .boot-readout.boot-readout--cinematic { bottom: 74px; }
   .boot-progress.boot-progress--cinematic { bottom: 62px; }
 }
@@ -252,7 +197,6 @@
   .boot-field,
   .boot-scan,
   .boot-prelude,
-  .boot-focus,
   .boot-readout,
   .boot-progress { animation: none !important; transition-duration: .01ms !important; }
 }

@@ -40,7 +40,6 @@ export class App {
     this.backdrop.start()
     await this.entry.wait(() => {
       void this.audio.unlock()
-      this.audio.entryConfirm()
     })
     this.audio.bootStart()
     await this.boot.play()

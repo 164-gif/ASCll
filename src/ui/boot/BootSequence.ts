@@ -40,9 +40,6 @@ export class BootSequence {
         <span class="boot-prelude__lead">ascii</span>
         <span class="boot-prelude__line">подготовка пространства</span>
       </div>
-      <div class="boot-focus" aria-hidden="true">
-        <span>готово</span>
-      </div>
       <div class="boot-readout boot-readout--cinematic">
         <span class="boot-readout__label">загрузка</span>
         <span class="boot-readout__value">000%</span>
@@ -67,7 +64,7 @@ export class BootSequence {
   async play(): Promise<void> {
     if (this.reducedMotion) {
       this.element.classList.add('boot-sequence--active', 'boot-sequence--locked')
-      this.updateReadout(1, 'готово')
+      this.updateReadout(1, 'загрузка')
       await sleep(260)
       this.element.classList.add('boot-sequence--leaving')
       await sleep(180)
@@ -144,7 +141,6 @@ export class BootSequence {
 
   private updatePhase(progress: number): void {
     const prelude = this.element.querySelector<HTMLElement>('.boot-prelude')
-    const focus = this.element.querySelector<HTMLElement>('.boot-focus')
 
     this.element.classList.toggle('boot-sequence--assembling', progress >= 0.08 && progress < 0.62)
     this.element.classList.toggle('boot-sequence--collapse', progress >= 0.62 && progress < 0.76)
@@ -152,14 +148,13 @@ export class BootSequence {
     this.element.classList.toggle('boot-sequence--locked', progress >= 0.84)
 
     if (prelude) prelude.style.opacity = progress < 0.22 ? String(1 - ease((progress - 0.15) / 0.07)) : '0'
-    if (focus) focus.style.opacity = progress >= 0.91 ? String(ease((progress - 0.91) / 0.06)) : '0'
 
     let label = 'загрузка'
     if (progress >= 0.22) label = 'сборка'
     if (progress >= 0.62) label = 'синхронизация'
     if (progress >= 0.76) label = '...'
     if (progress >= 0.84) label = 'проверка'
-    if (progress >= 0.96) label = 'готово'
+    if (progress >= 0.96) label = 'загрузка'
 
     const display = progress < 0.76
       ? progress / 0.84
