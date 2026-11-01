@@ -78,8 +78,8 @@ export class MainMenu {
       </section>
 
       <div class="menu-track" aria-hidden="true">
-        <span>sound</span>
-        <b>measured in pale glass</b>
+        <span>sound study</span>
+        <b>pale glass motif</b>
       </div>
 
       <footer class="menu-footer">
