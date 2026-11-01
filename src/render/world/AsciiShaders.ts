@@ -6,6 +6,7 @@ uniform float uTime;
 uniform vec3 uPlayerPos;
 uniform vec3 uTorchPos;
 uniform float uTorchPower;
+uniform vec4 uWorldLights[8];
 
 float hash21(vec2 p) {
   p = fract(p * vec2(234.34, 435.345));
@@ -38,6 +39,18 @@ float sampleAsciiGlyph(float charIndex, vec2 cellUV) {
   return texture2D(uAsciiTex, uv).r;
 }
 
+float worldGlowAt(vec2 xz) {
+  float glow = 0.0;
+  for (int i = 0; i < 8; i++) {
+    vec4 lightData = uWorldLights[i];
+    if (lightData.z > 0.001) {
+      float d = length(xz - lightData.xy) / max(0.1, lightData.w);
+      glow += lightData.z * exp(-d * d * 3.2);
+    }
+  }
+  return clamp(glow, 0.0, 1.4);
+}
+
 void asciiGrid(vec3 worldPos, out vec2 cellId, out vec2 cellUv, out vec3 quantWorld) {
   vec2 ortho = vec2(dot(worldPos, uCamRight), dot(worldPos, uCamUp));
   vec2 cellSize = vec2(0.105, 0.145);
@@ -61,40 +74,46 @@ void main() {
 export const groundFragmentShader = /* glsl */ `
 ${ASCII_COMMON}
 uniform vec4 uRipples[18];
+uniform vec4 uRoadSegments[32];
+uniform float uRoadCount;
 varying vec3 vWorldPos;
 
 float riverCenterZ(float x) {
   return -x * 0.58 - 5.5 + sin(x * 0.11) * 1.65 + cos(x * 0.05) * 1.1;
 }
 
-float obstacleShadow(vec2 xz) {
-  vec2 lightDir = normalize(vec2(1.25, 0.82));
-  float shadow = 1.0;
+float lineSegmentDistance(vec2 p, vec4 segment) {
+  vec2 a = segment.xy;
+  vec2 b = segment.zw;
+  vec2 ab = b - a;
+  float denom = max(dot(ab, ab), 0.0001);
+  float t = clamp(dot(p - a, ab) / denom, 0.0, 1.0);
+  return length(p - (a + ab * t));
+}
 
-  vec2 centers[4];
-  centers[0] = vec2(-5.4, 3.4);
-  centers[1] = vec2(-7.8, -8.5);
-  centers[2] = vec2(5.8, 1.2);
-  centers[3] = uPlayerPos.xz;
-  float widths[4];
-  widths[0] = 1.0;
-  widths[1] = 0.95;
-  widths[2] = 2.0;
-  widths[3] = 0.45;
-  float lengths[4];
-  lengths[0] = 7.2;
-  lengths[1] = 6.8;
-  lengths[2] = 4.5;
-  lengths[3] = 2.6;
-
-  for (int i = 0; i < 4; i++) {
-    vec2 d = xz - centers[i];
-    float proj = dot(d, lightDir);
-    float perp = length(d - lightDir * proj);
-    if (proj > 0.0 && proj < lengths[i]) {
-      shadow = min(shadow, smoothstep(widths[i] * 0.6, widths[i] * 1.25, perp + proj * 0.04));
-    }
+float roadDistance(vec2 p) {
+  float best = 999.0;
+  for (int i = 0; i < 32; i++) {
+    if (float(i) < uRoadCount) best = min(best, lineSegmentDistance(p, uRoadSegments[i]));
   }
+  return best;
+}
+
+float shadowCaster(vec2 xz, vec2 center, float width, float lengthValue) {
+  vec2 lightDir = normalize(vec2(1.25, 0.82));
+  vec2 d = xz - center;
+  float proj = dot(d, lightDir);
+  float perp = length(d - lightDir * proj);
+  if (proj <= 0.0 || proj >= lengthValue) return 1.0;
+  return smoothstep(width * 0.6, width * 1.25, perp + proj * 0.04);
+}
+
+float obstacleShadow(vec2 xz) {
+  float shadow = 1.0;
+  shadow = min(shadow, shadowCaster(xz, vec2(-8.5, 4.2), 1.0, 7.2));
+  shadow = min(shadow, shadowCaster(xz, vec2(-8.5, -15.6), 0.95, 6.8));
+  shadow = min(shadow, shadowCaster(xz, vec2(12.5, -13.8), 2.0, 4.5));
+  shadow = min(shadow, shadowCaster(xz, uPlayerPos.xz, 0.45, 2.6));
   return shadow;
 }
 
@@ -113,6 +132,7 @@ void main() {
   float distToTorch = length(xz - uTorchPos.xz);
   float flicker = 0.94 + 0.06 * sin(uTime * 17.0) * cos(uTime * 9.3);
   float torch = uTorchPower * flicker * exp(-distToTorch * distToTorch * 0.038);
+  float worldGlow = worldGlowAt(xz) * (0.9 + 0.1 * sin(uTime * 6.7));
   float rnd = hash21(cellID);
 
   if (absDist < halfWidth) {
@@ -141,12 +161,12 @@ void main() {
     }
 
     float stoneRadius = 0.34 + 0.18 * hash21(bestId * 1.7);
-    float stone = smoothstep(stoneRadius, stoneRadius - 0.12, minDist);
+    float stone = 1.0 - smoothstep(stoneRadius - 0.12, stoneRadius, minDist);
     float stoneHighlight = clamp(0.55 + dot(normalize(bestCenter + vec2(0.001)), vec2(-0.6, -0.8)) * 0.55, 0.15, 1.0);
 
     float warp = valueNoise(vec2(along * 0.45 - uTime * 1.6, across * 0.8));
     float streamCoord = across * 1.85 + sin(along * 0.55 - uTime * 2.1 + warp * 2.6) * 0.85;
-    float streamLine = smoothstep(0.13, 0.0, abs(fract(streamCoord * 0.35) - 0.5));
+    float streamLine = 1.0 - smoothstep(0.0, 0.13, abs(fract(streamCoord * 0.35) - 0.5));
     streamLine *= smoothstep(0.42, 0.68, valueNoise(vec2(along * 0.3 - uTime * 1.8, across * 0.5)));
 
     float shimmer = valueNoise(vec2(along * 1.8 - uTime * 4.2, across * 2.4));
@@ -157,7 +177,7 @@ void main() {
       vec4 rip = uRipples[i];
       if (rip.w > 0.01) {
         float dRip = length(xz - rip.xy);
-        rippleSum += smoothstep(0.32, 0.0, abs(dRip - rip.z)) * rip.w;
+        rippleSum += (1.0 - smoothstep(0.0, 0.32, abs(dRip - rip.z))) * rip.w;
       }
     }
     rippleSum = clamp(rippleSum, 0.0, 1.35);
@@ -171,7 +191,7 @@ void main() {
       lum = clamp(0.36 + activity * 0.62, 0.0, 1.0);
       charIdx = 16.0 + mod(floor(lum * 36.0 + rnd * 19.0 + floor(uTime * 7.0)), 42.0);
     } else if (stone > 0.15) {
-      lum = stone * stoneHighlight * (0.42 + torch * 0.9);
+      lum = stone * stoneHighlight * (0.42 + torch * 0.9 + worldGlow * 0.5);
       charIdx = 18.0 + mod(floor(rnd * 29.0 + stoneHighlight * 14.0), 34.0);
     } else if (bankEdge > 0.16 || rnd > 0.72) {
       lum = 0.18 + bankEdge * 0.26;
@@ -184,26 +204,43 @@ void main() {
     vec3 coldWave = vec3(0.73, 0.82, 0.90);
     vec3 warmStone = mix(vec3(0.48, 0.32, 0.12), vec3(1.0, 0.78, 0.30), stoneHighlight);
     vec3 warmWave = vec3(1.0, 0.88, 0.40);
-    vec3 stoneCol = mix(coldStone, warmStone, clamp(torch * 1.2, 0.0, 1.0));
-    vec3 waveCol = mix(coldWave, warmWave, clamp(torch * 1.5, 0.0, 1.0));
+    float warm = clamp(torch * 1.5 + worldGlow * 0.9, 0.0, 1.0);
+    vec3 stoneCol = mix(coldStone, warmStone, warm);
+    vec3 waveCol = mix(coldWave, warmWave, warm);
     vec3 charCol = mix(stoneCol * (0.55 + lum), waveCol, clamp(activity, 0.0, 1.0));
+    charCol += vec3(0.8, 0.48, 0.12) * worldGlow * 0.18;
     gl_FragColor = vec4(mix(waterBg, charCol, glyph * clamp(lum * 1.8, 0.18, 1.0)), 1.0);
     return;
   }
 
   float shadow = obstacleShadow(xz);
-  float bank = smoothstep(halfWidth + 2.5, halfWidth, absDist);
+  float bank = 1.0 - smoothstep(halfWidth, halfWidth + 2.5, absDist);
   float noise = valueNoise(xz * 0.45);
+  float roadDist = roadDistance(xz);
+  float roadMask = 1.0 - smoothstep(1.25, 2.35, roadDist);
+  float roadEdge = (1.0 - smoothstep(0.0, 0.75, abs(roadDist - 1.45))) * roadMask;
+  float roadNoise = valueNoise(xz * 1.15 + vec2(valueNoise(xz * 0.18) * 2.0));
+
   float charIdx = 5.0 + mod(floor(rnd * 37.0 + noise * 13.0), 45.0);
   float glyph = sampleAsciiGlyph(charIdx, cellUV);
+  float roadCharIdx = 12.0 + mod(floor(rnd * 23.0 + roadNoise * 18.0), 37.0);
+  float roadGlyph = sampleAsciiGlyph(roadCharIdx, cellUV);
 
   vec3 soil = vec3(0.022, 0.034, 0.024);
   vec3 grass = mix(vec3(0.09, 0.17, 0.085), vec3(0.26, 0.38, 0.20), noise);
   vec3 bankStone = vec3(0.42, 0.46, 0.47);
   vec3 lit = mix(grass, bankStone, bank * 0.72);
   lit += vec3(0.78, 0.56, 0.16) * torch * 0.7;
+  lit += vec3(0.88, 0.56, 0.19) * worldGlow * 0.62;
   lit *= 0.3 + 0.7 * shadow;
-  gl_FragColor = vec4(mix(soil * (0.55 + 0.45 * shadow), lit, glyph * (0.52 + bank * 0.22 + torch * 0.25)), 1.0);
+
+  vec3 roadDark = vec3(0.055, 0.052, 0.044);
+  vec3 roadLight = vec3(0.24, 0.22, 0.17);
+  vec3 roadCol = mix(roadDark, roadLight, roadNoise * 0.75 + roadEdge * 0.35);
+  roadCol += vec3(0.42, 0.28, 0.1) * worldGlow * 0.45;
+  vec3 groundCol = mix(soil * (0.55 + 0.45 * shadow), lit, glyph * (0.52 + bank * 0.22 + torch * 0.25));
+  groundCol = mix(groundCol, mix(roadDark, roadCol, roadGlyph * 0.82), roadMask * 0.94);
+  gl_FragColor = vec4(groundCol, 1.0);
 }
 `
 
@@ -239,7 +276,8 @@ void main() {
   float distTorch = length(toTorch);
   float torchDiff = clamp(dot(normalize(vNormal), normalize(toTorch + vec3(0.001))), 0.0, 1.0);
   float torch = uTorchPower * (0.35 + 0.65 * torchDiff) * exp(-distTorch * distTorch * 0.045);
-  float totalLight = clamp(0.15 + diff * 0.82 + torch * 0.9 + uEmissive, 0.04, 1.0);
+  float worldGlow = worldGlowAt(vWorldPos.xz) * (0.92 + 0.08 * sin(uTime * 6.7));
+  float totalLight = clamp(0.15 + diff * 0.82 + torch * 0.9 + worldGlow * 0.6 + uEmissive, 0.04, 1.0);
 
   float rnd = hash21(cellID + uCharOffset);
   float charIdx = clamp(floor(totalLight * 52.0 + (rnd - 0.5) * 11.0), 2.0, 62.0);
@@ -247,6 +285,7 @@ void main() {
 
   vec3 lit = mix(uDarkColor, uBaseColor, totalLight);
   lit += vec3(0.95, 0.72, 0.28) * torch * 0.58;
+  lit += vec3(1.0, 0.58, 0.16) * worldGlow * 0.55;
   vec3 bg = uDarkColor * 0.16;
   gl_FragColor = vec4(mix(bg, lit * 1.15, glyph), 1.0);
 }
@@ -275,7 +314,7 @@ void main() {
   vec2 away = aOffset.xz - uPlayerPos.xz;
   float d = length(away);
   float pushRadius = 1.2 + uSwingTime * 1.4;
-  float push = smoothstep(pushRadius, 0.14, d);
+  float push = 1.0 - smoothstep(0.14, pushRadius, d);
   vec2 dir = normalize(away + vec2(0.001));
   float bend = pow(vHeightFrac, 1.5);
   pos.x += (wind + dir.x * push * 0.78) * bend;
@@ -291,14 +330,29 @@ void main() {
 export const grassFragmentShader = /* glsl */ `
 uniform vec3 uTorchPos;
 uniform float uTorchPower;
+uniform vec4 uWorldLights[8];
+uniform float uTime;
 varying float vHeightFrac;
 varying float vFlower;
 varying float vShade;
 varying vec3 vWorldPos;
 
+float worldGrassGlow(vec2 xz) {
+  float glow = 0.0;
+  for (int i = 0; i < 8; i++) {
+    vec4 lightData = uWorldLights[i];
+    if (lightData.z > 0.001) {
+      float d = length(xz - lightData.xy) / max(0.1, lightData.w);
+      glow += lightData.z * exp(-d * d * 3.2);
+    }
+  }
+  return clamp(glow, 0.0, 1.2);
+}
+
 void main() {
   float distTorch = length(vWorldPos.xz - uTorchPos.xz);
   float torch = uTorchPower * exp(-distTorch * distTorch * 0.042);
+  float worldGlow = worldGrassGlow(vWorldPos.xz) * (0.92 + 0.08 * sin(uTime * 6.7));
   vec3 root = vec3(0.018, 0.038, 0.022);
   vec3 tip = mix(vec3(0.11, 0.23, 0.11), vec3(0.30, 0.45, 0.22), vShade);
   vec3 col = mix(root, tip, pow(vHeightFrac, 1.3));
@@ -306,6 +360,7 @@ void main() {
     col = vFlower > 1.5 ? vec3(0.94, 0.82, 0.34) : vec3(0.84, 0.88, 0.82);
   }
   col += vec3(0.72, 0.53, 0.18) * torch * (0.3 + 0.7 * vHeightFrac);
+  col += vec3(0.92, 0.54, 0.14) * worldGlow * (0.18 + 0.82 * vHeightFrac);
   gl_FragColor = vec4(col, 1.0);
 }
 `
