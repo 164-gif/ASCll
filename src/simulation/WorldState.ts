@@ -1,11 +1,18 @@
 import type { MovementInput } from '../input/InputController'
+import {
+  WORLD_LIMIT,
+  createWorldLandmarks,
+  isInsideRiver,
+  riverCenterZ,
+  riverSignedDistance,
+  terrainHeightAt,
+  zoneAt,
+  type WorldLandmark,
+  type WorldZone,
+} from '../world/WorldLayout'
 
-export type TreeObstacle = {
-  x: number
-  z: number
-  radius: number
-  height: number
-}
+export { isInsideRiver, riverCenterZ, riverSignedDistance, terrainHeightAt, zoneAt } from '../world/WorldLayout'
+export type TreeObstacle = WorldLandmark
 
 export type EnemyState = {
   id: number
@@ -26,22 +33,8 @@ export type PlayerState = {
   hurtPulse: number
 }
 
-const WORLD_LIMIT = 24
 const PLAYER_RADIUS = 0.42
 const TREE_CLEARANCE = 0.08
-const RIVER_HALF_WIDTH = 6.8
-
-export function riverCenterZ(x: number): number {
-  return -x * 0.58 - 5.5 + Math.sin(x * 0.11) * 1.65 + Math.cos(x * 0.05) * 1.1
-}
-
-export function riverSignedDistance(x: number, z: number): number {
-  return (z - riverCenterZ(x)) * 0.86
-}
-
-export function isInsideRiver(x: number, z: number): boolean {
-  return Math.abs(riverSignedDistance(x, z)) < RIVER_HALF_WIDTH
-}
 
 export class WorldState {
   readonly player: PlayerState = {
@@ -54,7 +47,7 @@ export class WorldState {
     hurtPulse: 0,
   }
 
-  readonly trees: TreeObstacle[] = []
+  readonly trees: WorldLandmark[] = []
   readonly enemies: EnemyState[] = []
   elapsed = 0
   kills = 0
@@ -63,8 +56,12 @@ export class WorldState {
   private deathTimer = 0
 
   constructor() {
-    this.generateLandmarks()
+    this.trees.push(...createWorldLandmarks())
     this.spawnEnemies()
+  }
+
+  get currentZone(): WorldZone {
+    return zoneAt(this.player.x, this.player.z)
   }
 
   toggleTorch(): void {
@@ -85,7 +82,8 @@ export class WorldState {
     const moving = Math.abs(input.x) + Math.abs(input.z) > 0.001
     const canRun = input.running && moving && this.player.stamina > 1
     const waterFactor = isInsideRiver(this.player.x, this.player.z) ? 0.76 : 1
-    const speed = (canRun ? 7.1 : 4.25) * waterFactor
+    const zoneFactor = this.currentZone.id === 'highland' ? 0.92 : this.currentZone.id === 'forest' ? 0.96 : 1
+    const speed = (canRun ? 7.1 : 4.25) * waterFactor * zoneFactor
 
     if (canRun) this.player.stamina = Math.max(0, this.player.stamina - dt * 23)
     else this.player.stamina = Math.min(100, this.player.stamina + dt * 15)
@@ -104,11 +102,14 @@ export class WorldState {
   }
 
   private tryMove(dx: number, dz: number): void {
+    const currentHeight = terrainHeightAt(this.player.x, this.player.z)
     const nx = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, this.player.x + dx))
-    if (!this.collidesTree(nx, this.player.z, PLAYER_RADIUS)) this.player.x = nx
+    const xSlope = Math.abs(terrainHeightAt(nx, this.player.z) - currentHeight)
+    if (xSlope < 0.72 && !this.collidesTree(nx, this.player.z, PLAYER_RADIUS)) this.player.x = nx
 
     const nz = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, this.player.z + dz))
-    if (!this.collidesTree(this.player.x, nz, PLAYER_RADIUS)) this.player.z = nz
+    const zSlope = Math.abs(terrainHeightAt(this.player.x, nz) - terrainHeightAt(this.player.x, this.player.z))
+    if (zSlope < 0.72 && !this.collidesTree(this.player.x, nz, PLAYER_RADIUS)) this.player.z = nz
   }
 
   private collidesTree(x: number, z: number, radius: number): boolean {
@@ -160,7 +161,7 @@ export class WorldState {
       const dx = this.player.x - enemy.x
       const dz = this.player.z - enemy.z
       const distance = Math.hypot(dx, dz)
-      if (distance > 8.5 || distance < 0.001) continue
+      if (distance > 10.5 || distance < 0.001) continue
 
       if (distance > 1.15) {
         const speed = (distance < 3.4 ? 1.65 : 1.1) * (isInsideRiver(enemy.x, enemy.z) ? 0.72 : 1)
@@ -184,23 +185,7 @@ export class WorldState {
     this.player.attackPulse = 0
     this.player.hurtPulse = 0
     this.deathTimer = 0
-    if (this.enemies.length < 3) this.spawnEnemies()
-  }
-
-  private generateLandmarks(): void {
-    const landmarks = [
-      [-5.4, 3.4, 1.05, 4.8],
-      [-1.8, 6.1, 1.35, 1.15],
-      [2.2, 6.4, 1.1, 0.95],
-      [5.8, 1.2, 2.5, 1.65],
-      [-7.8, -8.5, 1.0, 4.5],
-      [-14.5, -3.2, 2.1, 1.6],
-      [3.5, -13.5, 1.1, 4.4],
-      [-11.0, 9.2, 1.9, 1.4],
-      [10.5, -6.8, 2.4, 1.7],
-    ] as const
-
-    for (const [x, z, radius, height] of landmarks) this.trees.push({ x, z, radius, height })
+    if (this.enemies.length < 4) this.spawnEnemies()
   }
 
   private spawnEnemies(): void {
@@ -210,6 +195,16 @@ export class WorldState {
       [-8, -7],
       [10, 8],
       [-11, 6],
+      [-42, -8],
+      [-53, -22],
+      [-16, 47],
+      [4, 58],
+      [41, 18],
+      [57, 31],
+      [34, -43],
+      [48, -57],
+      [-70, 28],
+      [68, -10],
     ] as const
 
     for (let i = 0; i < positions.length; i += 1) {
@@ -220,7 +215,7 @@ export class WorldState {
         z,
         hp: 100,
         hitFlash: 0,
-        attackCooldown: 0.5 + i * 0.12,
+        attackCooldown: 0.5 + (i % 5) * 0.12,
       })
     }
   }
