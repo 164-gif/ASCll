@@ -1,15 +1,24 @@
 import type { MovementInput } from '../input/InputController'
 import {
   WORLD_LIMIT,
+  bridgeDeckHeightAt,
   createWorldLandmarks,
   isInsideRiver,
-  terrainHeightAt,
+  walkHeightAt,
   zoneAt,
   type WorldLandmark,
   type WorldZone,
 } from '../world/WorldLayout'
 
-export { isInsideRiver, riverCenterZ, riverSignedDistance, terrainHeightAt, zoneAt } from '../world/WorldLayout'
+export {
+  bridgeDeckHeightAt,
+  isInsideRiver,
+  riverCenterZ,
+  riverSignedDistance,
+  terrainHeightAt,
+  walkHeightAt,
+  zoneAt,
+} from '../world/WorldLayout'
 export type TreeObstacle = WorldLandmark
 
 export type EnemyState = {
@@ -79,7 +88,8 @@ export class WorldState {
 
     const moving = Math.abs(input.x) + Math.abs(input.z) > 0.001
     const canRun = input.running && moving && this.player.stamina > 1
-    const waterFactor = isInsideRiver(this.player.x, this.player.z) ? 0.76 : 1
+    const onBridge = bridgeDeckHeightAt(this.player.x, this.player.z) !== null
+    const waterFactor = isInsideRiver(this.player.x, this.player.z) && !onBridge ? 0.76 : 1
     const zoneFactor = this.currentZone.id === 'highland' ? 0.92 : this.currentZone.id === 'forest' ? 0.96 : 1
     const speed = (canRun ? 7.1 : 4.25) * waterFactor * zoneFactor
 
@@ -100,14 +110,14 @@ export class WorldState {
   }
 
   private tryMove(dx: number, dz: number): void {
-    const currentHeight = terrainHeightAt(this.player.x, this.player.z)
+    const currentHeight = walkHeightAt(this.player.x, this.player.z)
     const nx = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, this.player.x + dx))
-    const xSlope = Math.abs(terrainHeightAt(nx, this.player.z) - currentHeight)
-    if (xSlope < 0.72 && !this.collidesTree(nx, this.player.z, PLAYER_RADIUS)) this.player.x = nx
+    const xSlope = Math.abs(walkHeightAt(nx, this.player.z) - currentHeight)
+    if (xSlope < 0.92 && !this.collidesTree(nx, this.player.z, PLAYER_RADIUS)) this.player.x = nx
 
     const nz = Math.max(-WORLD_LIMIT, Math.min(WORLD_LIMIT, this.player.z + dz))
-    const zSlope = Math.abs(terrainHeightAt(this.player.x, nz) - terrainHeightAt(this.player.x, this.player.z))
-    if (zSlope < 0.72 && !this.collidesTree(this.player.x, nz, PLAYER_RADIUS)) this.player.z = nz
+    const zSlope = Math.abs(walkHeightAt(this.player.x, nz) - walkHeightAt(this.player.x, this.player.z))
+    if (zSlope < 0.92 && !this.collidesTree(this.player.x, nz, PLAYER_RADIUS)) this.player.z = nz
   }
 
   private collidesTree(x: number, z: number, radius: number): boolean {
@@ -162,7 +172,8 @@ export class WorldState {
       if (distance > 10.5 || distance < 0.001) continue
 
       if (distance > 1.15) {
-        const speed = (distance < 3.4 ? 1.65 : 1.1) * (isInsideRiver(enemy.x, enemy.z) ? 0.72 : 1)
+        const onBridge = bridgeDeckHeightAt(enemy.x, enemy.z) !== null
+        const speed = (distance < 3.4 ? 1.65 : 1.1) * (isInsideRiver(enemy.x, enemy.z) && !onBridge ? 0.72 : 1)
         const nx = enemy.x + (dx / distance) * speed * dt
         const nz = enemy.z + (dz / distance) * speed * dt
         if (!this.collidesTree(nx, enemy.z, 0.36)) enemy.x = nx
@@ -189,18 +200,18 @@ export class WorldState {
   private spawnEnemies(): void {
     const base = this.kills + this.enemies.length + 1
     const positions = [
-      [7, -5],
-      [-8, -7],
-      [10, 8],
-      [-11, 6],
+      [12, -7],
+      [-13, -8],
+      [12, 11],
+      [-14, 8],
       [-42, -8],
-      [-53, -22],
-      [-16, 47],
+      [-54, -23],
+      [-18, 48],
       [4, 58],
       [41, 18],
-      [57, 31],
-      [34, -43],
-      [48, -57],
+      [59, 31],
+      [31, -43],
+      [50, -59],
       [-70, 28],
       [68, -10],
     ] as const
