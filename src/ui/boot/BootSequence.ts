@@ -9,9 +9,11 @@ type GlyphParticle = {
   alpha: number
 }
 
-const GLYPHS = ['/', '\\', '|', ':', '.', '·', '[', ']', '{', '}', '0', '1', '+', '=']
-
-const easeOut = (value: number): number => 1 - Math.pow(1 - value, 3)
+const GLYPHS = ['/', '\\', '|', ':', '.', '·', '[', ']', '0', '1', '+']
+const ease = (value: number): number => {
+  const x = Math.max(0, Math.min(1, value))
+  return x * x * (3 - 2 * x)
+}
 const clamp01 = (value: number): number => Math.max(0, Math.min(1, value))
 
 export class BootSequence {
@@ -31,26 +33,21 @@ export class BootSequence {
     this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
     this.element = document.createElement('div')
     this.element.className = 'boot-sequence boot-sequence--cinematic'
-    this.element.setAttribute('aria-label', 'Loading')
+    this.element.setAttribute('aria-label', 'Загрузка')
     this.element.innerHTML = `
       <canvas class="boot-field" aria-hidden="true"></canvas>
-      <div class="boot-scan" aria-hidden="true"></div>
       <div class="boot-prelude">
-        <span class="boot-prelude__lead">ASCII // SIGNAL INTERFACE</span>
-        <span class="boot-prelude__line">constructing symbolic world layer</span>
+        <span class="boot-prelude__lead">ascii</span>
+        <span class="boot-prelude__line">подготовка пространства</span>
       </div>
-      <div class="boot-focus">
-        <span class="boot-focus__eyebrow">ATTENTION</span>
-        <span class="boot-focus__title">GLYPH FIELD</span>
-        <span class="boot-focus__meta">synchronizing // local renderer // world state</span>
+      <div class="boot-focus" aria-hidden="true">
+        <span>готово</span>
       </div>
       <div class="boot-readout boot-readout--cinematic">
-        <span class="boot-readout__label">WAKE SIGNAL</span>
+        <span class="boot-readout__label">загрузка</span>
         <span class="boot-readout__value">000%</span>
       </div>
       <div class="boot-progress boot-progress--cinematic" aria-hidden="true"><span></span></div>
-      <div class="boot-sequence__stamp">A5C11 // WORLD INTERFACE</div>
-      <div class="boot-sequence__corner">SYS.01 / INIT</div>
     `
 
     const canvas = this.element.querySelector<HTMLCanvasElement>('.boot-field')
@@ -70,17 +67,17 @@ export class BootSequence {
   async play(): Promise<void> {
     if (this.reducedMotion) {
       this.element.classList.add('boot-sequence--active', 'boot-sequence--locked')
-      this.updateReadout(1, 'READY')
-      await sleep(180)
+      this.updateReadout(1, 'готово')
+      await sleep(260)
       this.element.classList.add('boot-sequence--leaving')
-      await sleep(140)
+      await sleep(180)
       this.destroy()
       return
     }
 
     this.element.classList.add('boot-sequence--active')
     const started = performance.now()
-    const duration = 4100
+    const duration = 8400
 
     await new Promise<void>((resolve) => {
       const tick = (now: number): void => {
@@ -100,8 +97,9 @@ export class BootSequence {
       this.frame = requestAnimationFrame(tick)
     })
 
+    await sleep(260)
     this.element.classList.add('boot-sequence--leaving')
-    await sleep(620)
+    await sleep(960)
     this.destroy()
   }
 
@@ -117,7 +115,6 @@ export class BootSequence {
     this.width = Math.max(1, rect.width)
     this.height = Math.max(1, rect.height)
     this.dpr = Math.min(window.devicePixelRatio || 1, 1.75)
-
     this.canvas.width = Math.floor(this.width * this.dpr)
     this.canvas.height = Math.floor(this.height * this.dpr)
     this.canvas.style.width = `${this.width}px`
@@ -133,14 +130,14 @@ export class BootSequence {
       return seed / 0x100000000
     }
 
-    for (let i = 0; i < 128; i += 1) {
+    for (let i = 0; i < 164; i += 1) {
       this.particles.push({
-        angle: random() * Math.PI * 2 + i * 0.11,
-        radius: 34 + random() * 250,
-        drift: (random() - 0.5) * 0.7,
+        angle: random() * Math.PI * 2 + i * 0.071,
+        radius: 26 + random() * 270,
+        drift: (random() - 0.5) * 0.42,
         glyph: GLYPHS[Math.floor(random() * GLYPHS.length)] ?? '.',
         phase: random() * Math.PI * 2,
-        alpha: 0.18 + random() * 0.62,
+        alpha: 0.11 + random() * 0.5,
       })
     }
   }
@@ -149,39 +146,28 @@ export class BootSequence {
     const prelude = this.element.querySelector<HTMLElement>('.boot-prelude')
     const focus = this.element.querySelector<HTMLElement>('.boot-focus')
 
-    this.element.classList.toggle('boot-sequence--assembling', progress >= 0.12 && progress < 0.53)
-    this.element.classList.toggle('boot-sequence--collapse', progress >= 0.53 && progress < 0.64)
-    this.element.classList.toggle('boot-sequence--blackout', progress >= 0.64 && progress < 0.70)
-    this.element.classList.toggle('boot-sequence--locked', progress >= 0.70)
+    this.element.classList.toggle('boot-sequence--assembling', progress >= 0.08 && progress < 0.62)
+    this.element.classList.toggle('boot-sequence--collapse', progress >= 0.62 && progress < 0.76)
+    this.element.classList.toggle('boot-sequence--blackout', progress >= 0.76 && progress < 0.84)
+    this.element.classList.toggle('boot-sequence--locked', progress >= 0.84)
 
-    if (prelude) prelude.style.opacity = progress < 0.31 ? '1' : '0'
-    if (focus) focus.style.opacity = progress >= 0.70 ? '1' : '0'
+    if (prelude) prelude.style.opacity = progress < 0.22 ? String(1 - ease((progress - 0.15) / 0.07)) : '0'
+    if (focus) focus.style.opacity = progress >= 0.91 ? String(ease((progress - 0.91) / 0.06)) : '0'
 
-    let label = 'WAKE SIGNAL'
-    let displayProgress = progress * 0.42
+    let label = 'загрузка'
+    if (progress >= 0.22) label = 'сборка'
+    if (progress >= 0.62) label = 'синхронизация'
+    if (progress >= 0.76) label = '...'
+    if (progress >= 0.84) label = 'проверка'
+    if (progress >= 0.96) label = 'готово'
 
-    if (progress >= 0.18) {
-      label = 'MAPPING SYMBOL SPACE'
-      displayProgress = 0.22 + (progress - 0.18) * 0.82
-    }
-    if (progress >= 0.43) {
-      label = 'COLLAPSING FIELD'
-      displayProgress = 0.63 + (progress - 0.43) * 0.62
-    }
-    if (progress >= 0.64) {
-      label = 'SIGNAL LOST'
-      displayProgress = 0.91
-    }
-    if (progress >= 0.70) {
-      label = 'SIGNAL LOCKED'
-      displayProgress = 0.94 + (progress - 0.70) * 0.2
-    }
-    if (progress >= 0.93) {
-      label = 'READY'
-      displayProgress = 1
-    }
+    const display = progress < 0.76
+      ? progress / 0.84
+      : progress < 0.84
+        ? 0.91
+        : 0.91 + ((progress - 0.84) / 0.16) * 0.09
 
-    this.updateReadout(clamp01(displayProgress), label)
+    this.updateReadout(clamp01(display), label)
   }
 
   private updateReadout(progress: number, labelText: string): void {
@@ -196,93 +182,63 @@ export class BootSequence {
 
   private render(progress: number, seconds: number): void {
     this.ctx.clearRect(0, 0, this.width, this.height)
-
-    if (progress >= 0.64 && progress < 0.70) return
+    if (progress >= 0.76 && progress < 0.84) return
 
     const cx = this.width * 0.5
-    const cy = this.height * 0.5
+    const cy = this.height * 0.49
     const minSize = Math.min(this.width, this.height)
-    const assembling = clamp01((progress - 0.08) / 0.38)
-    const collapse = clamp01((progress - 0.50) / 0.14)
-    const locked = clamp01((progress - 0.70) / 0.19)
+    const assembling = ease((progress - 0.06) / 0.52)
+    const collapse = ease((progress - 0.60) / 0.16)
+    const locked = ease((progress - 0.84) / 0.12)
 
-    this.drawGuide(cx, cy, minSize, progress, seconds)
+    this.ctx.save()
+    this.ctx.strokeStyle = `rgba(224,231,228,${0.025 + assembling * 0.05})`
+    this.ctx.lineWidth = 1
+    this.ctx.beginPath()
+    this.ctx.arc(cx, cy, minSize * 0.19, 0, Math.PI * 2)
+    this.ctx.stroke()
+    this.ctx.restore()
 
     this.ctx.textAlign = 'center'
     this.ctx.textBaseline = 'middle'
-    this.ctx.font = `${Math.max(8, minSize * 0.012)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+    this.ctx.font = `${Math.max(8, minSize * 0.0115)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
 
     for (let i = 0; i < this.particles.length; i += 1) {
       const particle = this.particles[i]
       if (!particle) continue
 
-      const initialX = cx + Math.sin(particle.phase * 1.7) * this.width * 0.47
-      const initialY = cy + Math.cos(particle.phase * 1.3) * this.height * 0.43
-      const spiralRadius = particle.radius * (0.34 + i / this.particles.length)
-      const spiralAngle = particle.angle + seconds * (0.22 + particle.drift * 0.2) + i * 0.055
-      const targetX = cx + Math.cos(spiralAngle) * spiralRadius
-      const targetY = cy + Math.sin(spiralAngle) * spiralRadius * 0.42
+      const startX = cx + Math.sin(particle.phase * 1.3) * this.width * 0.48
+      const startY = cy + Math.cos(particle.phase * 1.7) * this.height * 0.46
+      const radius = particle.radius * (0.24 + i / this.particles.length)
+      const angle = particle.angle + seconds * (0.07 + particle.drift * 0.04) + i * 0.033
+      const targetX = cx + Math.cos(angle) * radius
+      const targetY = cy + Math.sin(angle) * radius * 0.38
 
-      let x = initialX + (targetX - initialX) * easeOut(assembling)
-      let y = initialY + (targetY - initialY) * easeOut(assembling)
+      let x = startX + (targetX - startX) * assembling
+      let y = startY + (targetY - startY) * assembling
 
       if (collapse > 0) {
-        const force = easeOut(collapse)
-        x += (cx - x) * force
-        y += (cy - y) * force
+        x += (cx - x) * collapse
+        y += (cy - y) * collapse
       }
 
       if (locked > 0) {
-        const ring = minSize * (0.055 + locked * 0.05)
-        const angle = particle.angle + seconds * 0.18
-        x = cx + Math.cos(angle) * ring * (0.9 + (i % 7) * 0.035)
-        y = cy + Math.sin(angle) * ring * 0.38
+        const ring = minSize * (0.038 + locked * 0.055)
+        const lockedAngle = particle.angle + seconds * 0.045
+        x = cx + Math.cos(lockedAngle) * ring * (0.92 + (i % 8) * 0.025)
+        y = cy + Math.sin(lockedAngle) * ring * 0.46
       }
 
-      const fadeIn = clamp01((progress - i / this.particles.length * 0.18) / 0.16)
-      const fadeOut = progress > 0.90 ? 1 - clamp01((progress - 0.90) / 0.10) : 1
-      const alpha = particle.alpha * fadeIn * Math.max(0.08, fadeOut)
-
-      this.ctx.fillStyle = `rgba(224, 232, 229, ${alpha})`
+      const appear = ease((progress - (i / this.particles.length) * 0.12) / 0.18)
+      const alpha = particle.alpha * appear * (progress > 0.97 ? 1 - ease((progress - 0.97) / 0.03) * 0.55 : 1)
+      this.ctx.fillStyle = `rgba(224,231,228,${alpha})`
       this.ctx.fillText(particle.glyph, x, y)
     }
 
     if (locked > 0) {
-      const pulse = 0.62 + Math.sin(seconds * 5.2) * 0.08
-      this.ctx.strokeStyle = `rgba(230, 238, 235, ${0.12 + locked * 0.25})`
-      this.ctx.lineWidth = 1
-      this.ctx.beginPath()
-      this.ctx.arc(cx, cy, minSize * 0.065 * pulse, 0, Math.PI * 2)
-      this.ctx.stroke()
-
-      this.ctx.fillStyle = `rgba(238, 243, 241, ${0.42 + locked * 0.4})`
-      this.ctx.font = `${Math.max(19, minSize * 0.052)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
-      this.ctx.fillText('A', cx, cy)
+      this.ctx.fillStyle = `rgba(234,239,237,${0.15 + locked * 0.54})`
+      this.ctx.font = `${Math.max(18, minSize * 0.044)}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+      this.ctx.fillText('a', cx, cy)
     }
-  }
-
-  private drawGuide(cx: number, cy: number, minSize: number, progress: number, seconds: number): void {
-    const alpha = progress < 0.70 ? 0.09 : 0.15
-    const radius = minSize * (0.09 + Math.sin(seconds * 0.5) * 0.002)
-
-    this.ctx.save()
-    this.ctx.translate(cx, cy)
-    this.ctx.rotate(seconds * 0.045)
-    this.ctx.strokeStyle = `rgba(226, 234, 231, ${alpha})`
-    this.ctx.lineWidth = 1
-    this.ctx.setLineDash([2, 8])
-    this.ctx.beginPath()
-    this.ctx.arc(0, 0, radius, 0, Math.PI * 2)
-    this.ctx.stroke()
-    this.ctx.setLineDash([])
-
-    this.ctx.strokeStyle = `rgba(226, 234, 231, ${alpha * 0.55})`
-    this.ctx.beginPath()
-    this.ctx.moveTo(-radius * 1.7, 0)
-    this.ctx.lineTo(radius * 1.7, 0)
-    this.ctx.moveTo(0, -radius * 0.9)
-    this.ctx.lineTo(0, radius * 0.9)
-    this.ctx.stroke()
-    this.ctx.restore()
   }
 }
