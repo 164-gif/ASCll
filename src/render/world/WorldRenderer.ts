@@ -2,10 +2,17 @@ import * as THREE from 'three'
 import { type EnemyState, type WorldState } from '../../simulation/WorldState'
 import {
   RIVER_HALF_WIDTH,
+  WORLD_BRIDGES,
+  WORLD_FIRES,
+  WORLD_ROAD_SEGMENTS,
+  bridgeDeckHeightAt,
   isInsideRiver,
   riverSignedDistance,
+  roadDistanceAt,
   terrainHeightAt,
+  walkHeightAt,
   zoneAt,
+  type WorldBridge,
   type WorldLandmark,
 } from '../../world/WorldLayout'
 import { createAsciiAtlas } from './AsciiAtlas'
@@ -20,6 +27,7 @@ import {
 
 const BASE_FRUSTUM = 21
 const MAX_RIPPLES = 18
+const MAX_ROAD_SEGMENTS = 32
 const WORLD_RENDER_SIZE = 202
 
 type ObjectMaterial = THREE.ShaderMaterial & {
@@ -42,10 +50,23 @@ export class WorldRenderer {
   private readonly playerGroup = new THREE.Group()
   private readonly enemyMeshes = new Map<number, THREE.Group>()
   private readonly objectMaterials: ObjectMaterial[] = []
+  private readonly fireFlames: THREE.Mesh[] = []
   private readonly ripples = Array.from({ length: MAX_RIPPLES }, () => new THREE.Vector4(999, 999, 0, 0))
   private readonly camRight = new THREE.Vector3(1, 0, 0)
   private readonly camUp = new THREE.Vector3(0, 1, 0)
   private readonly torchPos = new THREE.Vector3()
+  private readonly roadSegments = Array.from({ length: MAX_ROAD_SEGMENTS }, (_, index) => {
+    const segment = WORLD_ROAD_SEGMENTS[index]
+    return segment
+      ? new THREE.Vector4(segment[0], segment[1], segment[2], segment[3])
+      : new THREE.Vector4(999, 999, 999, 999)
+  })
+  private readonly worldLights = Array.from({ length: 8 }, (_, index) => {
+    const light = WORLD_FIRES[index]
+    return light
+      ? new THREE.Vector4(light.x, light.z, light.strength, light.radius)
+      : new THREE.Vector4(999, 999, 0, 1)
+  })
 
   private readonly shared = {
     uAsciiTex: { value: this.atlas },
@@ -57,6 +78,9 @@ export class WorldRenderer {
     uTorchPower: { value: 0 },
     uRipples: { value: this.ripples },
     uSwingTime: { value: 0 },
+    uWorldLights: { value: this.worldLights },
+    uRoadSegments: { value: this.roadSegments },
+    uRoadCount: { value: Math.min(MAX_ROAD_SEGMENTS, WORLD_ROAD_SEGMENTS.length) },
   }
 
   private capeMesh: THREE.Mesh | null = null
@@ -94,7 +118,9 @@ export class WorldRenderer {
     this.camera.updateMatrixWorld()
 
     this.buildGround()
+    this.buildBridges()
     this.buildLandmarks(world)
+    this.buildFires()
     this.buildGrass(world)
     this.buildKnight()
 
@@ -106,7 +132,7 @@ export class WorldRenderer {
   render(world: WorldState, dt: number): void {
     if (this.disposed) return
 
-    const playerY = terrainHeightAt(world.player.x, world.player.z)
+    const playerY = walkHeightAt(world.player.x, world.player.z)
     this.shared.uTime.value = world.elapsed
     this.shared.uPlayerPos.value.set(world.player.x, playerY, world.player.z)
 
@@ -117,6 +143,14 @@ export class WorldRenderer {
       playerY + 1.45,
       world.player.z + Math.cos(world.player.facing) * 0.45,
     )
+
+    for (let index = 0; index < this.fireFlames.length; index += 1) {
+      const flame = this.fireFlames[index]!
+      const phase = index * 1.73
+      flame.scale.y = 0.86 + Math.sin(world.elapsed * 8.4 + phase) * 0.14
+      flame.scale.x = 0.92 + Math.sin(world.elapsed * 6.1 + phase) * 0.08
+      flame.rotation.y += dt * (0.7 + (index % 3) * 0.14)
+    }
 
     this.updateRipples(world, dt)
     this.syncPlayer(world, dt)
@@ -162,6 +196,7 @@ export class WorldRenderer {
         uPlayerPos: this.shared.uPlayerPos,
         uTorchPos: this.shared.uTorchPos,
         uTorchPower: this.shared.uTorchPower,
+        uWorldLights: this.shared.uWorldLights,
         uBaseColor: { value: new THREE.Color(base) },
         uDarkColor: { value: new THREE.Color(dark) },
         uCharOffset: { value: charOffset },
@@ -173,7 +208,7 @@ export class WorldRenderer {
   }
 
   private buildGround(): void {
-    const geometry = new THREE.PlaneGeometry(WORLD_RENDER_SIZE, WORLD_RENDER_SIZE, 88, 88)
+    const geometry = new THREE.PlaneGeometry(WORLD_RENDER_SIZE, WORLD_RENDER_SIZE, 96, 96)
     geometry.rotateX(-Math.PI / 2)
     const position = geometry.attributes.position
     if (position) {
@@ -194,6 +229,78 @@ export class WorldRenderer {
     this.scene.add(new THREE.Mesh(geometry, material))
   }
 
+  private buildBridges(): void {
+    const stone = this.createAsciiMaterial(0x8a8880, 0x171817, 5.2)
+    const stoneDark = this.createAsciiMaterial(0x4e514f, 0x0b0d0c, 3.3)
+    const wood = this.createAsciiMaterial(0x86613f, 0x1d1209, 6.4)
+
+    for (const bridge of WORLD_BRIDGES) {
+      if (bridge.style === 'stone') this.buildStoneBridge(bridge, stone, stoneDark)
+      else this.buildWoodBridge(bridge, wood, stoneDark)
+    }
+  }
+
+  private buildStoneBridge(bridge: WorldBridge, stone: ObjectMaterial, dark: ObjectMaterial): void {
+    const deckHeight = terrainHeightAt(bridge.x, bridge.z) + bridge.deckOffset
+    const group = new THREE.Group()
+    group.position.set(bridge.x, deckHeight - 0.18, bridge.z)
+    group.rotation.y = bridge.rotation
+
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(bridge.width, 0.36, bridge.length), stone)
+    group.add(deck)
+
+    const parapetGeometry = new THREE.BoxGeometry(0.28, 0.58, bridge.length * 0.98)
+    const left = new THREE.Mesh(parapetGeometry, stone)
+    left.position.set(-bridge.width * 0.48, 0.42, 0)
+    const right = new THREE.Mesh(parapetGeometry.clone(), stone)
+    right.position.set(bridge.width * 0.48, 0.42, 0)
+    group.add(left, right)
+
+    for (const z of [-bridge.length * 0.32, 0, bridge.length * 0.32]) {
+      const pier = new THREE.Mesh(new THREE.BoxGeometry(bridge.width * 0.72, 2.25, 0.72), dark)
+      pier.position.set(0, -1.05, z)
+      group.add(pier)
+    }
+
+    for (const z of [-bridge.length * 0.45, bridge.length * 0.45]) {
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(bridge.width * 1.18, 0.48, 1.2), stone)
+      cap.position.set(0, 0.05, z)
+      group.add(cap)
+    }
+
+    this.scene.add(group)
+  }
+
+  private buildWoodBridge(bridge: WorldBridge, wood: ObjectMaterial, support: ObjectMaterial): void {
+    const deckHeight = terrainHeightAt(bridge.x, bridge.z) + bridge.deckOffset
+    const group = new THREE.Group()
+    group.position.set(bridge.x, deckHeight, bridge.z)
+    group.rotation.y = bridge.rotation
+
+    const plankCount = 20
+    const step = bridge.length / plankCount
+    for (let i = 0; i < plankCount; i += 1) {
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(bridge.width, 0.18, step * 0.82), wood)
+      plank.position.set(0, -0.09 + Math.sin(i * 1.9) * 0.025, -bridge.length * 0.5 + step * (i + 0.5))
+      plank.rotation.y = Math.sin(i * 2.3) * 0.018
+      group.add(plank)
+    }
+
+    for (const side of [-1, 1]) {
+      for (let i = 1; i < 6; i += 1) {
+        const z = -bridge.length * 0.5 + (bridge.length / 6) * i
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.05, 0.16), support)
+        post.position.set(side * bridge.width * 0.48, 0.42, z)
+        group.add(post)
+      }
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.13, bridge.length * 0.9), wood)
+      rail.position.set(side * bridge.width * 0.48, 0.75, 0)
+      group.add(rail)
+    }
+
+    this.scene.add(group)
+  }
+
   private buildLandmarks(world: WorldState): void {
     const stone = this.createAsciiMaterial(0x7c858e, 0x161a1e, 1.3)
     const mossStone = this.createAsciiMaterial(0x68766c, 0x141916, 4.7)
@@ -211,15 +318,20 @@ export class WorldRenderer {
         this.buildRuin(landmark, baseY, ruinStone, index)
         return
       }
+      if (landmark.kind === 'gate') {
+        this.buildGate(landmark, baseY, ruinStone, index)
+        return
+      }
+      if (landmark.kind === 'tower') {
+        this.buildTower(landmark, baseY, ruinStone, stone, index)
+        return
+      }
       if (landmark.kind === 'monolith') {
         const group = new THREE.Group()
         group.position.set(landmark.x, baseY, landmark.z)
         group.rotation.y = landmark.rotation ?? 0
 
-        const base = new THREE.Mesh(
-          new THREE.BoxGeometry(landmark.radius * 2.15, 0.8, landmark.radius * 1.65),
-          stone,
-        )
+        const base = new THREE.Mesh(new THREE.BoxGeometry(landmark.radius * 2.15, 0.8, landmark.radius * 1.65), stone)
         base.position.y = 0.4
         group.add(base)
 
@@ -263,23 +375,27 @@ export class WorldRenderer {
     group.add(trunk)
 
     const crown = [
-      { y: 0.4, radius: 2.25, height: 0.32 },
-      { y: 0.55, radius: 2.0, height: 0.3 },
-      { y: 0.69, radius: 1.65, height: 0.27 },
-      { y: 0.81, radius: 1.28, height: 0.23 },
-      { y: 0.91, radius: 0.82, height: 0.18 },
+      { y: 0.4, radius: 2.35, height: 0.32 },
+      { y: 0.54, radius: 2.08, height: 0.3 },
+      { y: 0.68, radius: 1.7, height: 0.27 },
+      { y: 0.81, radius: 1.3, height: 0.23 },
+      { y: 0.91, radius: 0.84, height: 0.18 },
     ] as const
 
     crown.forEach((tier, tierIndex) => {
       const mesh = new THREE.Mesh(
         new THREE.ConeGeometry(
-          landmark.radius * tier.radius * (0.94 + ((index + tierIndex) % 3) * 0.035),
+          landmark.radius * tier.radius * (0.93 + ((index + tierIndex) % 4) * 0.035),
           landmark.height * tier.height,
-          8,
+          9,
         ),
         pine,
       )
-      mesh.position.y = landmark.height * tier.y
+      mesh.position.set(
+        Math.sin(index * 1.7 + tierIndex) * landmark.radius * 0.08,
+        landmark.height * tier.y,
+        Math.cos(index * 1.3 + tierIndex) * landmark.radius * 0.07,
+      )
       mesh.rotation.y = index * 0.37 + tierIndex * 0.69
       group.add(mesh)
     })
@@ -287,20 +403,17 @@ export class WorldRenderer {
     const branchGeometry = new THREE.CylinderGeometry(
       landmark.radius * 0.055,
       landmark.radius * 0.075,
-      landmark.radius * 1.55,
+      landmark.radius * 1.7,
       5,
     )
-    const branchA = new THREE.Mesh(branchGeometry, bark)
-    branchA.position.set(landmark.radius * 0.52, landmark.height * 0.34, 0)
-    branchA.rotation.z = Math.PI * 0.43
-    branchA.rotation.y = index * 0.37
-    group.add(branchA)
-
-    const branchB = new THREE.Mesh(branchGeometry.clone(), bark)
-    branchB.position.set(-landmark.radius * 0.44, landmark.height * 0.41, landmark.radius * 0.1)
-    branchB.rotation.z = -Math.PI * 0.4
-    branchB.rotation.y = index * 0.53 + 0.8
-    group.add(branchB)
+    for (let branchIndex = 0; branchIndex < 3; branchIndex += 1) {
+      const branch = new THREE.Mesh(branchGeometry.clone(), bark)
+      const side = branchIndex % 2 === 0 ? 1 : -1
+      branch.position.set(side * landmark.radius * (0.38 + branchIndex * 0.08), landmark.height * (0.33 + branchIndex * 0.07), 0)
+      branch.rotation.z = side * Math.PI * (0.36 + branchIndex * 0.035)
+      branch.rotation.y = index * 0.37 + branchIndex * 1.8
+      group.add(branch)
+    }
 
     this.scene.add(group)
   }
@@ -310,43 +423,132 @@ export class WorldRenderer {
     group.position.set(landmark.x, baseY, landmark.z)
     group.rotation.y = landmark.rotation ?? 0
 
-    const wall = new THREE.Mesh(
-      new THREE.BoxGeometry(landmark.radius * 2.3, landmark.height, 0.42),
-      material,
-    )
-    wall.position.y = landmark.height * 0.5
-    group.add(wall)
+    const wallWidth = landmark.radius * 2.45
+    const opening = landmark.radius * 0.72
+    const sideWidth = Math.max(0.36, (wallWidth - opening) * 0.5)
+    const left = new THREE.Mesh(new THREE.BoxGeometry(sideWidth, landmark.height, 0.46), material)
+    left.position.set(-(opening + sideWidth) * 0.5, landmark.height * 0.5, 0)
+    const right = new THREE.Mesh(new THREE.BoxGeometry(sideWidth * 0.88, landmark.height * 0.82, 0.46), material)
+    right.position.set((opening + sideWidth) * 0.5, landmark.height * 0.41, 0)
+    right.rotation.z = ((index % 3) - 1) * 0.035
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(wallWidth, 0.42, 0.52), material)
+    lintel.position.set(0, landmark.height * 0.86, 0)
+    lintel.rotation.z = 0.025 * ((index % 2) * 2 - 1)
+    group.add(left, right, lintel)
 
-    const broken = new THREE.Mesh(
-      new THREE.BoxGeometry(0.46, landmark.height * 0.72, landmark.radius * 1.7),
-      material,
-    )
-    broken.position.set(landmark.radius * 0.58, landmark.height * 0.36, 0.2)
-    broken.rotation.y = 0.06 * ((index % 3) - 1)
-    group.add(broken)
+    const sideWall = new THREE.Mesh(new THREE.BoxGeometry(0.46, landmark.height * 0.72, landmark.radius * 1.9), material)
+    sideWall.position.set(landmark.radius * 0.82, landmark.height * 0.36, landmark.radius * 0.3)
+    sideWall.rotation.y = 0.05
+    group.add(sideWall)
 
-    const fallen = new THREE.Mesh(
-      new THREE.BoxGeometry(landmark.radius * 1.15, 0.34, 0.52),
-      material,
-    )
-    fallen.position.set(-landmark.radius * 0.55, 0.2, landmark.radius * 0.72)
+    const fallen = new THREE.Mesh(new THREE.BoxGeometry(landmark.radius * 1.35, 0.34, 0.52), material)
+    fallen.position.set(-landmark.radius * 0.55, 0.2, landmark.radius * 0.8)
     fallen.rotation.y = 0.6
+    fallen.rotation.z = 0.08
     group.add(fallen)
-
-    const pillar = new THREE.Mesh(
-      new THREE.BoxGeometry(0.34, landmark.height * 0.58, 0.34),
-      material,
-    )
-    pillar.position.set(-landmark.radius * 0.72, landmark.height * 0.29, -landmark.radius * 0.32)
-    pillar.rotation.z = ((index % 2) * 2 - 1) * 0.06
-    group.add(pillar)
 
     this.scene.add(group)
   }
 
+  private buildGate(landmark: WorldLandmark, baseY: number, material: ObjectMaterial, index: number): void {
+    const group = new THREE.Group()
+    group.position.set(landmark.x, baseY, landmark.z)
+    group.rotation.y = landmark.rotation ?? 0
+
+    const opening = landmark.radius * 1.25
+    const pillarWidth = landmark.radius * 0.46
+    const pillarHeight = landmark.height * 0.9
+    for (const side of [-1, 1]) {
+      const pillar = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth, pillarHeight, landmark.radius * 0.65), material)
+      pillar.position.set(side * (opening * 0.5 + pillarWidth * 0.5), pillarHeight * 0.5, 0)
+      pillar.rotation.z = side * Math.sin(index * 1.9) * 0.018
+      group.add(pillar)
+
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(pillarWidth * 1.35, 0.34, landmark.radius * 0.82), material)
+      cap.position.set(side * (opening * 0.5 + pillarWidth * 0.5), pillarHeight + 0.12, 0)
+      group.add(cap)
+    }
+
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(opening + pillarWidth * 2.2, 0.5, landmark.radius * 0.72), material)
+    lintel.position.y = landmark.height
+    group.add(lintel)
+
+    const brokenTop = new THREE.Mesh(new THREE.BoxGeometry(landmark.radius * 0.7, 0.42, landmark.radius * 0.6), material)
+    brokenTop.position.set(landmark.radius * 0.52, landmark.height + 0.42, 0)
+    brokenTop.rotation.z = 0.11
+    group.add(brokenTop)
+
+    this.scene.add(group)
+  }
+
+  private buildTower(
+    landmark: WorldLandmark,
+    baseY: number,
+    material: ObjectMaterial,
+    trim: ObjectMaterial,
+    index: number,
+  ): void {
+    const group = new THREE.Group()
+    group.position.set(landmark.x, baseY, landmark.z)
+    group.rotation.y = landmark.rotation ?? 0
+
+    const bodyHeight = landmark.height * 0.83
+    const body = new THREE.Mesh(new THREE.BoxGeometry(landmark.radius * 1.75, bodyHeight, landmark.radius * 1.75), material)
+    body.position.y = bodyHeight * 0.5
+    group.add(body)
+
+    const crownY = bodyHeight + 0.36
+    const battlementSize = landmark.radius * 0.42
+    const battlementPositions = [
+      [-0.56, -0.56], [0, -0.56], [0.56, -0.56],
+      [-0.56, 0.56], [0, 0.56], [0.56, 0.56],
+      [-0.56, 0], [0.56, 0],
+    ] as const
+    for (const [x, z] of battlementPositions) {
+      const block = new THREE.Mesh(new THREE.BoxGeometry(battlementSize, 0.72, battlementSize), trim)
+      block.position.set(x * landmark.radius * 1.45, crownY, z * landmark.radius * 1.45)
+      group.add(block)
+    }
+
+    const fallen = new THREE.Mesh(new THREE.BoxGeometry(landmark.radius * 1.4, 0.34, 0.45), trim)
+    fallen.position.set(landmark.radius * 0.82, 0.2, landmark.radius * 0.95)
+    fallen.rotation.y = index * 0.9
+    group.add(fallen)
+
+    this.scene.add(group)
+  }
+
+  private buildFires(): void {
+    const stone = this.createAsciiMaterial(0x635e55, 0x151310, 8.1)
+    const ember = this.createAsciiMaterial(0xffb229, 0x5b1700, 19.2, 0.92)
+
+    WORLD_FIRES.forEach((fire, index) => {
+      const group = new THREE.Group()
+      group.position.set(fire.x, terrainHeightAt(fire.x, fire.z), fire.z)
+
+      for (let i = 0; i < 6; i += 1) {
+        const angle = (i / 6) * Math.PI * 2
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(0.18 + (i % 2) * 0.04, 0), stone)
+        rock.position.set(Math.cos(angle) * 0.48, 0.15, Math.sin(angle) * 0.48)
+        group.add(rock)
+      }
+
+      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.34, 1.08, 7), ember)
+      flame.position.y = 0.62
+      flame.rotation.y = index * 0.7
+      group.add(flame)
+      this.fireFlames.push(flame)
+
+      const flameCore = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), ember)
+      flameCore.position.y = 0.42
+      group.add(flameCore)
+      this.scene.add(group)
+    })
+  }
+
   private buildGrass(world: WorldState): void {
     const coarse = window.matchMedia('(pointer: coarse)').matches
-    const bladeCount = coarse ? 70000 : 142000
+    const bladeCount = coarse ? 76000 : 164000
     const spread = 182
 
     const base = new THREE.BufferGeometry()
@@ -354,12 +556,8 @@ export class WorldRenderer {
       'position',
       new THREE.BufferAttribute(
         new Float32Array([
-          -0.045, 0, 0,
-          0.045, 0, 0,
-          0, 1, 0,
-          0, 0, -0.045,
-          0, 0, 0.045,
-          0, 1, 0,
+          -0.045, 0, 0, 0.045, 0, 0, 0, 1, 0,
+          0, 0, -0.045, 0, 0, 0.045, 0, 1, 0,
         ]),
         3,
       ),
@@ -378,28 +576,29 @@ export class WorldRenderer {
       return seed / 0x100000000
     }
 
-    while (valid < bladeCount && attempts < bladeCount * 7) {
+    while (valid < bladeCount && attempts < bladeCount * 8) {
       attempts += 1
       const x = (random() - 0.5) * spread
       const z = (random() - 0.5) * spread
       const riverDist = Math.abs(riverSignedDistance(x, z))
       if (riverDist < RIVER_HALF_WIDTH + 0.08) continue
+      if (roadDistanceAt(x, z) < 0.72) continue
 
       const zone = zoneAt(x, z)
       const density =
         zone.id === 'meadow' ? 1 :
-        zone.id === 'forest' ? 0.96 :
-        zone.id === 'ruins' ? 0.9 :
-        zone.id === 'river' ? 0.88 :
-        zone.id === 'wilds' ? 0.82 :
-        0.72
+        zone.id === 'forest' ? 0.985 :
+        zone.id === 'ruins' ? 0.94 :
+        zone.id === 'river' ? 0.9 :
+        zone.id === 'wilds' ? 0.88 :
+        0.76
       if (random() > density) continue
 
       let blocked = false
       for (const obstacle of world.trees) {
         const dx = x - obstacle.x
         const dz = z - obstacle.z
-        const radius = obstacle.radius * (obstacle.kind === 'tree' ? 0.54 : 0.84)
+        const radius = obstacle.radius * (obstacle.kind === 'tree' ? 0.5 : 0.8)
         if (dx * dx + dz * dz < radius * radius) {
           blocked = true
           break
@@ -412,22 +611,22 @@ export class WorldRenderer {
       offsets[valid * 3 + 2] = z
 
       const bank = Math.min(1, Math.max(0, (riverDist - RIVER_HALF_WIDTH) * 0.42))
-      let height = 0.38 + random() * 0.5
-      let flowerChance = 0.035
+      let height = 0.4 + random() * 0.53
+      let flowerChance = 0.04
       if (zone.id === 'meadow') {
-        height *= 1.3
-        flowerChance = 0.11
+        height *= 1.34
+        flowerChance = 0.125
       } else if (zone.id === 'forest') {
-        height *= 0.96
-        flowerChance = 0.018
+        height *= 1.02
+        flowerChance = 0.022
       } else if (zone.id === 'highland') {
         height *= 0.72
         flowerChance = 0.018
       } else if (zone.id === 'ruins') {
-        height *= 0.9
-        flowerChance = 0.03
+        height *= 0.94
+        flowerChance = 0.035
       }
-      height *= 0.78 + 0.22 * bank
+      height *= 0.8 + 0.2 * bank
 
       const flowerRoll = random()
       scaleRot[valid * 3] = height
@@ -448,6 +647,7 @@ export class WorldRenderer {
         uPlayerPos: this.shared.uPlayerPos,
         uTorchPos: this.shared.uTorchPos,
         uTorchPower: this.shared.uTorchPower,
+        uWorldLights: this.shared.uWorldLights,
         uSwingTime: this.shared.uSwingTime,
       },
       side: THREE.DoubleSide,
@@ -519,10 +719,11 @@ export class WorldRenderer {
     if (moving) this.walkCycle += dt * (isInsideRiver(world.player.x, world.player.z) ? 9.5 : 12)
 
     const riverDistance = Math.abs(riverSignedDistance(world.player.x, world.player.z))
-    const sink = isInsideRiver(world.player.x, world.player.z)
+    const onBridge = bridgeDeckHeightAt(world.player.x, world.player.z) !== null
+    const sink = isInsideRiver(world.player.x, world.player.z) && !onBridge
       ? -0.28 * Math.min(1, (RIVER_HALF_WIDTH - riverDistance) * 0.6)
       : 0
-    const baseY = terrainHeightAt(world.player.x, world.player.z)
+    const baseY = walkHeightAt(world.player.x, world.player.z)
 
     this.playerGroup.position.set(world.player.x, baseY + sink, world.player.z)
     this.playerGroup.rotation.y = world.player.facing
@@ -582,8 +783,9 @@ export class WorldRenderer {
     for (const enemy of enemies) {
       alive.add(enemy.id)
       const group = this.enemyMeshes.get(enemy.id) ?? this.createEnemy(enemy)
-      const baseY = terrainHeightAt(enemy.x, enemy.z)
-      group.position.set(enemy.x, baseY + (isInsideRiver(enemy.x, enemy.z) ? -0.2 : 0), enemy.z)
+      const onBridge = bridgeDeckHeightAt(enemy.x, enemy.z) !== null
+      const baseY = walkHeightAt(enemy.x, enemy.z)
+      group.position.set(enemy.x, baseY + (isInsideRiver(enemy.x, enemy.z) && !onBridge ? -0.2 : 0), enemy.z)
       const dx = this.shared.uPlayerPos.value.x - enemy.x
       const dz = this.shared.uPlayerPos.value.z - enemy.z
       group.rotation.y = Math.atan2(dx, dz)
@@ -600,7 +802,8 @@ export class WorldRenderer {
 
   private updateRipples(world: WorldState, dt: number): void {
     const moved = Math.hypot(world.player.x - this.lastX, world.player.z - this.lastZ)
-    if (isInsideRiver(world.player.x, world.player.z) && moved > 0.002) {
+    const onBridge = bridgeDeckHeightAt(world.player.x, world.player.z) !== null
+    if (isInsideRiver(world.player.x, world.player.z) && !onBridge && moved > 0.002) {
       this.stepDistance += moved
       if (this.stepDistance > 0.8) {
         this.stepDistance = 0
@@ -611,7 +814,9 @@ export class WorldRenderer {
     if (world.player.attackPulse > this.lastAttackPulse + 0.08) {
       const x = world.player.x + Math.sin(world.player.facing) * 1.1
       const z = world.player.z + Math.cos(world.player.facing) * 1.1
-      if (isInsideRiver(x, z) || isInsideRiver(world.player.x, world.player.z)) this.spawnRipple(x, z, 1.35, 0.4)
+      if ((isInsideRiver(x, z) || isInsideRiver(world.player.x, world.player.z)) && bridgeDeckHeightAt(x, z) === null) {
+        this.spawnRipple(x, z, 1.35, 0.4)
+      }
     }
     this.lastAttackPulse = world.player.attackPulse
 
@@ -634,7 +839,7 @@ export class WorldRenderer {
     this.camera.zoom = this.currentZoom
 
     const targetX = world.player.x
-    const targetY = terrainHeightAt(world.player.x, world.player.z)
+    const targetY = walkHeightAt(world.player.x, world.player.z)
     const targetZ = world.player.z + 22
     this.camera.position.x += (targetX - this.camera.position.x) * Math.min(1, dt * 6)
     this.camera.position.y += (targetY + 26 - this.camera.position.y) * Math.min(1, dt * 4.5)
