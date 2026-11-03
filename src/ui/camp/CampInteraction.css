@@ -81,3 +81,7 @@
 .house-peephole__hint span { color:#b0bbb1; }
 .house-peephole__hint button { margin-top:14px; padding:8px; background:none; border:0; color:#7c8a80; font-size:9px; }
 @media(max-height:650px) { .house-device { padding-top:18px; padding-bottom:18px; } .house-radio__header { margin-bottom:15px; } .house-radio__transmission { margin-top:14px; } .house-radio__knob { width:56px!important; height:56px!important; } }
+
+.camp-interaction__tv-channel { position:absolute; left:50%; bottom:clamp(105px,15vh,150px); transform:translateX(-50%); border:0; background:rgba(0,0,0,.66); color:#aab6ac; padding:8px 13px; font-size:10px!important; letter-spacing:.1em; pointer-events:auto; }
+.camp-interaction__tv-channel[hidden] { display:none; }
+.camp-interaction__tv-channel:hover { color:#e0e7df; }

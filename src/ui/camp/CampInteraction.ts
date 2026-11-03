@@ -49,6 +49,7 @@ export class CampInteraction {
     this.element.className = 'camp-interaction'
     this.element.innerHTML = `
       <button class="camp-interaction__prompt" type="button" aria-live="polite"></button>
+      <button class="camp-interaction__tv-channel" type="button" data-tv-channel hidden></button>
       <button class="journal-open" type="button" data-journal>J · записи</button>
       <div class="camp-dialogue" role="dialog" aria-modal="true" aria-label="Разговор" aria-hidden="true" inert>
         <div class="camp-dialogue__panel">
@@ -101,6 +102,9 @@ export class CampInteraction {
     if (this.toast.textContent !== world.notice) this.toast.textContent = world.notice
     this.toast.classList.toggle('quest-toast--visible', !this.isModal && world.noticeUntil > world.elapsed)
     this.element.querySelector('.house-reticle')!.classList.toggle('is-visible', world.chapter === 'awakening' && !this.isModal)
+    const channelButton = this.element.querySelector<HTMLButtonElement>('[data-tv-channel]')!
+    channelButton.hidden = this.isModal || world.chapter !== 'awakening' || !world.house.tvOn || world.houseTarget?.id !== 'television'
+    if (!channelButton.hidden) channelButton.textContent = `Q · канал ${world.house.tvChannel + 1} / 3`
     if (this.isModal) { this.setPrompt(''); return }
     if (world.chapter === 'awakening') {
       const target = world.houseTarget
@@ -334,6 +338,7 @@ export class CampInteraction {
       this.houseControls.open(world, target.id === 'radio' ? 'radio' : 'peephole'); this.changed(); return
     }
     if (!world.useHouseObject(target.id)) return
+    if (target.id === 'television') this.element.dispatchEvent(new Event('interaction:media', { bubbles: true }))
     if (target.id === 'fridge') { this.openFridge(world); return }
     if (target.id === 'bed') {
       this.showDialogue('Кровать', 'Простыня всё ещё тёплая. Можно закрыть глаза. Только бы снова не оказаться в том лесу.', [
@@ -344,7 +349,13 @@ export class CampInteraction {
     }
     if (target.id === 'note') {
       this.showDialogue('Записка · мой почерк', '«◌ ⋮ ∴»\n\nТри знака. Я только что видел их в лесу. Ниже написано: «Если снова проснёшься здесь — включи радио. Не доверяй тишине».', [{ label: 'Положить записку обратно.', run: () => this.close() }])
-    } else world.notify(target.id === 'television' ? world.house.tvOn ? 'Телевизор включён · E выключить' : 'Экран погас' : world.house.lampOn ? 'Лампа включена' : 'Лампа погасла')
+    } else world.notify(target.id === 'television' ? world.house.tvOn ? `Телевизор · канал ${world.house.tvChannel + 1}` : 'Экран погас' : world.house.lampOn ? 'Лампа включена' : 'Лампа погасла')
+  }
+
+  nextTelevisionChannel(world: WorldState): void {
+    if (this.isModal || !world.nextTelevisionChannel()) return
+    this.element.dispatchEvent(new Event('interaction:media', { bubbles: true }))
+    this.update(world)
   }
 
   private openFridge(world: WorldState): void {
@@ -381,6 +392,7 @@ export class CampInteraction {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button'); if (!button || !this.world) return
     if (button.dataset.choice !== undefined) this.choose(Number(button.dataset.choice))
     else if (button.hasAttribute('data-close')) this.close()
+    else if (button.hasAttribute('data-tv-channel')) this.nextTelevisionChannel(this.world)
     else if (button.hasAttribute('data-journal')) this.toggleJournal(this.world)
     else if (button === this.prompt) this.interact(this.world)
   }

@@ -42,6 +42,10 @@ export class GameSession {
       return
     }
 
+    if (event.code === 'KeyQ' && !event.repeat && !this.map.isOpen) {
+      this.interaction.nextTelevisionChannel(this.world); return
+    }
+
     if (event.code === 'KeyM' && !event.repeat) {
       if (this.interaction.isModal) return
       event.preventDefault()
@@ -74,6 +78,11 @@ export class GameSession {
 
   private readonly handleMapClose = (): void => {
     this.map.close(this.world)
+  }
+
+  private readonly handleMediaInteraction = (): void => {
+    this.audio.resumeFromGesture()
+    this.renderer.syncHouseMedia(this.world)
   }
 
   private readonly handleInteractionChange = (): void => { this.syncInputState() }
@@ -112,6 +121,7 @@ export class GameSession {
     this.map.element.addEventListener('world-map:toggle', this.handleMapToggle)
     this.map.element.addEventListener('world-map:close', this.handleMapClose)
     this.interaction.element.addEventListener('interaction:change', this.handleInteractionChange)
+    this.interaction.element.addEventListener('interaction:media', this.handleMediaInteraction)
     document.addEventListener('visibilitychange', this.handleVisibility)
   }
 
@@ -137,6 +147,7 @@ export class GameSession {
     this.input.destroy(this.element)
     this.map.destroy()
     this.interaction.element.removeEventListener('interaction:change', this.handleInteractionChange)
+    this.interaction.element.removeEventListener('interaction:media', this.handleMediaInteraction)
     this.interaction.destroy()
     this.hud.destroy()
     this.campEnhancer.destroy()

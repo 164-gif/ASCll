@@ -39,16 +39,40 @@ export class AudioDirector {
   private previousTorch = true
   private nextCrackleAt = 0
   private houseRadio: HouseRadioAudio | null = null
-  private televisionGain: GainNode | null = null
+  private televisionVideo: HTMLVideoElement | null = null
   private televisionSource: MediaElementAudioSourceNode | null = null
+  private televisionNodes: AudioNode[] = []
   private readonly handleHouseVideo = (event: Event): void => {
+    this.disconnectTelevision()
+    this.televisionVideo = (event as CustomEvent<HTMLVideoElement | null>).detail
+    this.connectTelevision()
+  }
+
+  private disconnectTelevision(): void {
     this.televisionSource?.disconnect(); this.televisionSource = null
-    this.televisionGain?.disconnect(); this.televisionGain = null
-    const video = (event as CustomEvent<HTMLVideoElement | null>).detail
-    if (!video || !this.context || !this.worldSceneGain) return
-    const volume = this.context.createGain(); volume.gain.value = 0.24; this.televisionGain = volume
-    this.televisionSource = this.context.createMediaElementSource(video)
-    this.televisionSource.connect(volume).connect(this.worldSceneGain); video.muted = false
+    this.televisionNodes.forEach((node) => node.disconnect()); this.televisionNodes = []
+  }
+
+  private connectTelevision(): void {
+    const video = this.televisionVideo, context = this.context, destination = this.worldSceneGain
+    if (!video || !context || !destination || this.televisionSource) return
+    const input = context.createGain(); input.gain.value = 2
+    const highpass = context.createBiquadFilter(); highpass.type = 'highpass'; highpass.frequency.value = 85
+    const lowpass = context.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.value = 5500
+    const compressor = context.createDynamicsCompressor()
+    compressor.threshold.value = -24; compressor.knee.value = 16; compressor.ratio.value = 5
+    compressor.attack.value = 0.006; compressor.release.value = 0.18
+    const output = context.createGain(); output.gain.value = 2.2
+    this.televisionSource = context.createMediaElementSource(video)
+    this.televisionSource.connect(input).connect(highpass).connect(lowpass).connect(compressor).connect(output).connect(destination)
+    this.televisionNodes = [input, highpass, lowpass, compressor, output]
+    video.muted = false
+  }
+
+  resumeFromGesture(): void {
+    if (!this.context) this.buildGraph()
+    if (this.context?.state === 'suspended') void this.context.resume()
+    this.connectTelevision()
   }
 
   private readonly handleSettings = (event: Event): void => {
@@ -230,7 +254,7 @@ export class AudioDirector {
 
   destroy(): void {
     this.houseRadio?.destroy(); this.houseRadio = null
-    this.televisionSource?.disconnect(); this.televisionGain?.disconnect()
+    this.disconnectTelevision(); this.televisionVideo = null
     window.removeEventListener('ascii:house-video', this.handleHouseVideo)
     window.removeEventListener('ascii:audio-settings', this.handleSettings)
     document.removeEventListener('visibilitychange', this.handleVisibility)
@@ -270,6 +294,7 @@ export class AudioDirector {
     this.musicFilter = musicFilter
     this.effectsGain = effectsGain
     this.worldSceneGain = worldSceneGain
+    this.connectTelevision()
     this.noiseBuffer = this.createNoiseBuffer(context, 7)
 
     this.riverGain = this.createLoopingNoise(worldSceneGain, 'lowpass', 1900, 0.72)

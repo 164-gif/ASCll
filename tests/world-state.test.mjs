@@ -275,3 +275,17 @@ test('chapter selection starts directly in the house while a normal new game sti
   assert.equal(valley.quests['silent-bell'], 'available')
   assert.equal(valley.beginAwakening(), false)
 })
+
+test('television channels require a nearby powered-on television and wrap around', () => {
+  const world = awakenedWorld()
+  assert.equal(world.nextTelevisionChannel(), false)
+  Object.assign(world.player, { x: 4.2, z: 1.5 }); world.house.yaw = Math.PI / 2
+  assert.equal(world.nextTelevisionChannel(), false)
+  assert.equal(world.useHouseObject('television'), true)
+  for (const channel of [1, 2, 0]) {
+    assert.equal(world.nextTelevisionChannel(), true)
+    assert.equal(world.house.tvChannel, channel)
+  }
+  Object.assign(world.player, { x: 0, z: 0 })
+  assert.equal(world.nextTelevisionChannel(), false)
+})

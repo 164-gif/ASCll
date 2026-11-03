@@ -222,6 +222,8 @@ export class WorldRenderer {
     this.targetZoom = this.targetZoom < 2.4 ? 3.6 : 1.15
   }
 
+  syncHouseMedia(world: WorldState): void { this.awakening?.syncTelevision(world, true) }
+
   destroy(): void {
     if (this.disposed) return
     this.disposed = true

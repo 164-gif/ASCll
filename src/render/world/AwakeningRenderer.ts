@@ -1,4 +1,4 @@
-import { HOUSE_TV_VIDEO } from '../../audio/HouseMedia'
+import { HOUSE_TV_CHANNELS } from '../../audio/HouseMedia'
 import * as THREE from 'three'
 import type { WorldState } from '../../simulation/WorldState'
 import { HOUSE_FURNITURE, HOUSE_WALLS } from '../../world/WakingHouse'
@@ -48,6 +48,7 @@ export class AwakeningRenderer {
   private readonly video = document.createElement('video')
   private videoTexture: THREE.VideoTexture | null = null
   private playRequested = false
+  private videoChannel = -1
   private readonly fridgeDoor = new THREE.Group()
   private readonly bottles: THREE.Group[] = []
   private readonly handleVisibility = (): void => { if (document.hidden) { this.video.pause(); this.playRequested = false } }
@@ -83,13 +84,10 @@ export class AwakeningRenderer {
     this.box(tv, dark, -0.08, 0.48, 0.44, 1.05, 0.76, 0.04)
     this.canvas.width = 512; this.canvas.height = 384
     this.televisionTexture = new THREE.CanvasTexture(this.canvas)
-    if (HOUSE_TV_VIDEO) {
-      this.video.src = HOUSE_TV_VIDEO; this.video.loop = true; this.video.playsInline = true; this.video.preload = 'none'
-      this.video.muted = true
-      this.videoTexture = new THREE.VideoTexture(this.video); this.videoTexture.colorSpace = THREE.SRGBColorSpace
-      window.dispatchEvent(new CustomEvent('ascii:house-video', { detail: this.video }))
-      document.addEventListener('visibilitychange', this.handleVisibility)
-    }
+    this.video.loop = true; this.video.playsInline = true; this.video.preload = 'none'; this.video.muted = true
+    this.videoTexture = new THREE.VideoTexture(this.video); this.videoTexture.colorSpace = THREE.SRGBColorSpace
+    window.dispatchEvent(new CustomEvent('ascii:house-video', { detail: this.video }))
+    document.addEventListener('visibilitychange', this.handleVisibility)
     const screenMaterial = new THREE.MeshBasicMaterial({ map: this.televisionTexture, color: 0xc5d6ce }); this.materials.add(screenMaterial)
     this.televisionScreen = this.box(tv, screenMaterial, -0.08, 0.49, 0.47, 0.9, 0.63, 0.012)
     for (const height of [0.29, 0.66]) this.box(tv, metal, 0.52, height, 0.46, 0.09, 0.09, 0.06)
@@ -149,24 +147,39 @@ export class AwakeningRenderer {
     this.radioLight.visible = house.radioOn
     this.televisionScreen.visible = house.tvOn
     this.televisionLight.intensity = house.tvOn ? 3.5 : 0
-    if (HOUSE_TV_VIDEO && house.tvOn && !document.hidden && !this.playRequested) {
-      this.playRequested = true; void this.video.play().catch(() => { /* Keep the emergency broadcast if media cannot play. */ })
-    } else if ((!house.tvOn || document.hidden) && this.playRequested) { this.video.pause(); this.playRequested = false }
+    this.syncTelevision(world)
     const screenMaterial = this.televisionScreen.material as THREE.MeshBasicMaterial
-    const map = this.video.readyState >= 2 && !this.video.error ? this.videoTexture : this.televisionTexture
+    const map = HOUSE_TV_CHANNELS[house.tvChannel] && this.video.readyState >= 2 && !this.video.error ? this.videoTexture : this.televisionTexture
     if (screenMaterial.map !== map) { screenMaterial.map = map; screenMaterial.needsUpdate = true }
     const frame = Math.floor(house.elapsed * 8)
-    if (house.tvOn && frame !== this.lastBroadcastFrame) { this.lastBroadcastFrame = frame; this.drawBroadcast(house.elapsed) }
+    if (house.tvOn && (frame !== this.lastBroadcastFrame || this.videoChannel !== house.tvChannel)) { this.lastBroadcastFrame = frame; this.drawBroadcast(house.elapsed) }
     renderer.shadowMap.enabled = true
     const previousTarget = renderer.getRenderTarget()
     renderer.setRenderTarget(this.target); renderer.render(this.scene, this.camera)
     renderer.setRenderTarget(previousTarget); renderer.render(this.screenScene, this.screenCamera)
   }
 
+  syncTelevision(world: WorldState, fromGesture = false): void {
+    const house = world.house
+    if (this.videoChannel !== house.tvChannel) {
+      this.video.pause(); this.playRequested = false; this.videoChannel = house.tvChannel
+      const url = HOUSE_TV_CHANNELS[house.tvChannel]
+      if (url) this.video.src = url
+      else this.video.removeAttribute('src')
+      this.video.load()
+    }
+    const shouldPlay = !!HOUSE_TV_CHANNELS[house.tvChannel] && house.tvOn && !document.hidden
+    if (fromGesture && shouldPlay && this.video.paused) this.playRequested = false
+    if (shouldPlay && !this.playRequested) {
+      this.playRequested = true
+      void this.video.play().catch(() => { /* A later user interaction can retry playback. */ })
+    } else if (!shouldPlay && this.playRequested) { this.video.pause(); this.playRequested = false }
+  }
+
   destroy(): void {
     document.removeEventListener('visibilitychange', this.handleVisibility)
     this.video.pause(); this.video.removeAttribute('src'); this.video.load(); this.videoTexture?.dispose()
-    if (HOUSE_TV_VIDEO) window.dispatchEvent(new CustomEvent('ascii:house-video', { detail: null }))
+    window.dispatchEvent(new CustomEvent('ascii:house-video', { detail: null }))
     this.scene.traverse((object) => { if (object instanceof THREE.Mesh) object.geometry.dispose() })
     this.screenScene.traverse((object) => { if (object instanceof THREE.Mesh) object.geometry.dispose() })
     this.materials.forEach((material) => material.dispose()); this.post.dispose(); this.target.dispose(); this.televisionTexture.dispose()

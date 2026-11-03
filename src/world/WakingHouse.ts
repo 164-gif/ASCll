@@ -1,3 +1,4 @@
+export const HOUSE_TV_CHANNEL_COUNT = 3
 export type HouseObjectId = 'radio' | 'television' | 'note' | 'door' | 'lamp' | 'fridge' | 'bed'
 export type HouseBox = { x: number; z: number; width: number; depth: number; height: number }
 export type HouseFurniture = HouseBox & { kind: 'bed' | 'sofa' | 'table' | 'cabinet' | 'fridge' | 'sink' | 'wardrobe' | 'chair' }

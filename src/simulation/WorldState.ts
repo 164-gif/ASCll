@@ -44,7 +44,7 @@ export type PlayerState = {
 
 import { FOREST_CAMP_OLD_MAN } from '../world/ForestCamp'
 import { ANOMALY_QUESTS, type QuestStatus } from '../world/Anomalies'
-import { HOUSE_SPAWN, HOUSE_OBJECTS, houseSightClear, houseBlocked, houseRoomAt, type HouseObjectId } from '../world/WakingHouse'
+import { HOUSE_TV_CHANNEL_COUNT, HOUSE_SPAWN, HOUSE_OBJECTS, houseSightClear, houseBlocked, houseRoomAt, type HouseObjectId } from '../world/WakingHouse'
 import { environmentAt } from './EnvironmentState'
 import { ENTERABLE_BUILDINGS, buildingEntrance, TENT_ELDER, TENT_BED, INTERIOR_DEPTH, INTERIOR_WIDTH, INTERIOR_EXIT, INTERIOR_FURNITURE, RESIDENTS, pointInRect, settlementBlocked, type Resident } from '../world/Settlement'
 
@@ -71,7 +71,7 @@ export class WorldState {
   chapter: GameChapter = 'valley'
   awakeningPending = false
   readonly house = {
-    yaw: 0, pitch: -0.08, elapsed: 0, radioOn: true, tvOn: false, lampOn: true,
+    yaw: 0, pitch: -0.08, elapsed: 0, radioOn: true, tvOn: false, tvChannel: 0, lampOn: true,
     peeking: false, fridgeOpen: false, beer: 4, beersDrunk: 0, sleepHours: 0,
     radioFrequency: 610, radioFine: 0, radioSettled: 0, noteRead: false,
   }
@@ -155,6 +155,13 @@ export class WorldState {
     if (id === 'door') this.house.peeking = true
     if (id === 'fridge') this.house.fridgeOpen = true
     if (id === 'note') this.house.noteRead = true
+    return true
+  }
+
+  nextTelevisionChannel(): boolean {
+    if (this.houseTarget?.id !== 'television' || !this.house.tvOn) return false
+    this.house.tvChannel = (this.house.tvChannel + 1) % HOUSE_TV_CHANNEL_COUNT
+    this.notify(`Телевизор · канал ${this.house.tvChannel + 1}`)
     return true
   }
 
