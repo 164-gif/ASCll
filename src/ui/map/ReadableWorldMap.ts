@@ -1,3 +1,4 @@
+import { ANOMALY_QUESTS } from '../../world/Anomalies'
 import type { WorldState } from '../../simulation/WorldState'
 import {
   RIVER_HALF_WIDTH,
@@ -68,7 +69,7 @@ export class WorldMap {
           <span><i class="world-map__dot world-map__dot--player"></i>ты</span>
           <span><i class="readable-map__road-key"></i>дорога</span>
           <span><i class="readable-map__water-key"></i>вода</span>
-          <span>△ лагерь</span>
+          <span>△ лагерь</span><span>∴ след / область поиска</span>
           <span>═ мост</span>
           <span>⌂ строение</span><span style="color:#a2b18c">· жители</span>
         </footer>
@@ -156,6 +157,7 @@ export class WorldMap {
     this.ctx.clearRect(0, 0, size, size)
     this.ctx.drawImage(this.staticLayer, 0, 0, size, size)
     this.drawActiveSector(world, size)
+    this.drawQuests(world, size)
     this.drawActors(world, size)
   }
 
@@ -382,6 +384,29 @@ export class WorldMap {
     this.ctx.shadowBlur = 12
     this.ctx.strokeRect(col * half + 4, row * half + 4, half - 8, half - 8)
     this.ctx.restore()
+  }
+
+  private drawQuests(world: WorldState, size: number): void {
+    const ctx = this.ctx
+    ctx.save()
+    for (const quest of ANOMALY_QUESTS) {
+      const status = world.quests[quest.id]
+      if (!status || status === 'locked' || status === 'available') continue
+      const p = this.worldToCanvas(quest.x, quest.z, size)
+      ctx.strokeStyle = '#' + quest.color.toString(16); ctx.fillStyle = ctx.strokeStyle
+      if (status === 'active') {
+        const radius = 8 * size / (WORLD_LIMIT * 2)
+        ctx.setLineDash([4, 5]); ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([])
+      }
+      if (status !== 'active' || Math.hypot(world.mapPosition.x - quest.x, world.mapPosition.z - quest.z) < 8) {
+        ctx.font = '14px monospace'; ctx.textAlign = 'center'; ctx.fillText(quest.glyph, p.x, p.y + 4)
+      }
+    }
+    if (world.activeQuest && world.quests[world.activeQuest.id] === 'surveyed') {
+      const camp = this.worldToCanvas(FOREST_CAMP_X, FOREST_CAMP_Z, size)
+      ctx.fillStyle = '#ded1a4'; ctx.font = '10px monospace'; ctx.textAlign = 'left'; ctx.fillText('ОТЧЁТ', camp.x + 12, camp.y + 6)
+    }
+    ctx.restore()
   }
 
   private drawActors(world: WorldState, size: number): void {

@@ -9,6 +9,7 @@ export class GameHud {
   private readonly status: HTMLElement
   private readonly torch: HTMLElement
   private readonly environment: HTMLElement
+  private readonly quest: HTMLElement
 
   constructor(parent: HTMLElement) {
     this.element = document.createElement('div')
@@ -21,7 +22,8 @@ export class GameHud {
         <span class="game-hud__name" data-torch></span><span class="game-hud__environment" data-environment></span>
       </div>
       <div class="game-hud__objective" data-objective>речная низина</div>
-      <div class="game-hud__hint">WASD двигаться · E разговор / дверь · SHIFT бег · SPACE / ЛКМ удар · F свет · M карта · Z макро ASCII · колесо масштаб · ESC меню</div>
+      <div class="game-hud__hint">WASD двигаться · E разговор / дверь · J записи · SHIFT бег · SPACE / ЛКМ удар · F свет · M карта · Z макро ASCII · колесо масштаб · ESC меню</div>
+      <div class="game-hud__quest" data-quest></div>
       <div class="game-hud__event" data-status></div>
     `
 
@@ -32,6 +34,7 @@ export class GameHud {
     const torch = this.element.querySelector<HTMLElement>('[data-torch]')
     if (!hp || !stamina || !objective || !status || !torch) throw new Error('HUD nodes are unavailable')
 
+    this.quest = this.element.querySelector<HTMLElement>('[data-quest]')!
     this.environment = this.element.querySelector<HTMLElement>('[data-environment]')!
     this.hp = hp
     this.stamina = stamina
@@ -46,6 +49,11 @@ export class GameHud {
     this.stamina.style.transform = `scaleX(${Math.max(0, world.player.stamina) / 100})`
     this.torch.textContent = world.torchOn ? 'f · light on' : 'f · light off'
 
+    const quest = world.activeQuest
+    const completed = Object.values(world.quests).filter((status) => status === 'completed').length
+    this.quest.textContent = quest
+      ? `∴ ${quest.title}\n${world.quests[quest.id] === 'surveyed' ? 'Вернись к седому страннику' : 'Найди след · область отмечена на M'} · J записи`
+      : completed === 3 ? '∴ Три следа изучены · фонарь странника' : 'J · полевые записи\nПоручения у странника в лесном лагере'
     const environment = world.environment
     const hour = Math.floor(environment.hour).toString().padStart(2, '0')
     const minute = Math.floor((environment.hour % 1) * 60).toString().padStart(2, '0')

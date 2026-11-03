@@ -302,3 +302,5 @@
 }
 
 .game-hud__environment { color: rgba(207,196,162,.7); font-size: 9px; letter-spacing: .1em; padding-top: 6px; }
+.game-hud__quest { position:absolute; bottom:clamp(28px,5vh,60px); left:clamp(18px,2.6vw,42px); width:min(290px,75vw); white-space:pre-line; color:rgba(204,199,170,.7); font-size:10px; line-height:1.9; letter-spacing:.06em; }
+@media(max-width:600px) { .game-hud__quest { bottom:34px; font-size:9px; max-width:210px; } .game-hud__hint { display:none; } }

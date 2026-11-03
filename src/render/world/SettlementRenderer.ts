@@ -1,7 +1,7 @@
 import * as THREE from 'three'
 import type { WorldState, ResidentState } from '../../simulation/WorldState'
 import { TOWN_BUILDINGS, TOWN_CENTER, TOWN_FIELDS, TOWN_WALL, terrainHeightAt } from '../../world/WorldLayout'
-import { INTERIOR_DEPTH, INTERIOR_WIDTH, INTERIOR_FURNITURE, TOWN_COLLIDERS, type InteriorKind } from '../../world/Settlement'
+import { TENT_ELDER, INTERIOR_DEPTH, INTERIOR_WIDTH, INTERIOR_FURNITURE, TOWN_COLLIDERS, type InteriorKind } from '../../world/Settlement'
 
 type MaterialFactory = (base: number, dark: number, offset?: number, emissive?: number) => THREE.ShaderMaterial
 
@@ -29,7 +29,7 @@ export class SettlementRenderer {
     this.interiorScene.background = new THREE.Color(0x030504)
     this.buildTown()
     this.buildFields()
-    for (const kind of ['inn', 'smithy', 'hall'] as const) this.buildRoom(kind)
+    for (const kind of ['inn', 'smithy', 'hall', 'tent'] as const) this.buildRoom(kind)
   }
 
   update(world: WorldState): void {
@@ -207,13 +207,41 @@ export class SettlementRenderer {
     this.people.set(person.id, group); this.scene.add(group); return group
   }
 
+  private buildTentShell(room: THREE.Group): void {
+    const canvas = this.make(0xa29879, 0x25251b, 7)
+    const cloth = this.make(0x76534a, 0x20130e, 11)
+    this.box(room, cloth, 0, 0.03, 0.5, 9.5, 0.05, 8)
+    for (const side of [-1, 1]) {
+      this.box(room, canvas, side * 7.4, 1.2, 0, 0.18, 2.4, 13)
+      const slope = this.box(room, canvas, side * 5.7, 3, -1.7, 4.3, 0.12, 9.4)
+      slope.rotation.z = -side * 0.5
+      this.box(room, this.wood, side * 6.6, 1.9, -5.7, 0.15, 3.8, 0.15)
+    }
+    this.box(room, canvas, 0, 1.7, -6.3, 14.8, 3.4, 0.15)
+    this.box(room, this.wood, 0, 4.6, -1, 0.16, 0.16, 10.8)
+    this.box(room, this.wood, 0, 2.3, -6, 0.15, 4.6, 0.15)
+    this.box(room, canvas, -4.8, 0.35, 6.4, 5.4, 0.7, 0.15)
+    this.box(room, canvas, 4.8, 0.35, 6.4, 5.4, 0.7, 0.15)
+    // The roof's near half stays open to the fixed camera.
+    this.box(room, this.wood, TENT_ELDER.x, 0.22, TENT_ELDER.z, 1.4, 0.44, 1.2)
+    const cloak = this.make(0x81725d, 0x171510, 9)
+    const elder = new THREE.Mesh(new THREE.ConeGeometry(0.43, 1.15, 7), cloak)
+    elder.position.set(TENT_ELDER.x, 0.95, TENT_ELDER.z); room.add(elder)
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.27, 9, 7), this.straw)
+    head.position.set(TENT_ELDER.x, 1.6, TENT_ELDER.z); room.add(head)
+    this.box(room, this.wood, TENT_ELDER.x + 0.6, 0.9, TENT_ELDER.z, 0.09, 1.8, 0.09)
+    for (let i = 0; i < 4; i++) this.box(room, this.straw, 2.1 + i * 0.3, 0.96, -2 + Math.sin(i) * 0.3, 0.25, 0.06, 0.7)
+  }
+
   private buildRoom(kind: InteriorKind): void {
     const room = new THREE.Group(); room.name = `interior-${kind}`; room.visible = false
     this.box(room, this.wood, 0, -0.12, 0, INTERIOR_WIDTH, 0.24, INTERIOR_DEPTH)
+    if (kind !== 'tent') {
     for (const side of [-1, 1]) this.box(room, this.stone, side * INTERIOR_WIDTH / 2, 1.8, 0, 0.3, 3.6, INTERIOR_DEPTH)
     this.box(room, this.stone, 0, 1.8, -INTERIOR_DEPTH / 2, INTERIOR_WIDTH, 3.6, 0.3)
     // The near wall is cut low, so the character stays visible from the fixed camera.
     for (const side of [-1, 1]) this.box(room, this.stone, side * 4.4, 0.4, INTERIOR_DEPTH / 2, 6.2, 0.8, 0.3)
+    } else this.buildTentShell(room)
     this.box(room, this.glow, 0, 0.03, 6, 2.1, 0.05, 0.7)
     for (let x = -6.5; x < 7; x += 1) this.box(room, this.dark, x, 0.015, 0, 0.035, 0.02, INTERIOR_DEPTH)
     for (const side of [-1, 1]) {
@@ -228,6 +256,10 @@ export class SettlementRenderer {
         this.box(room, this.straw, item.x, item.height + 0.12, item.z, 0.8, 0.05, 0.6)
       } else {
         this.box(room, mat, item.x, item.height / 2, item.z, item.width, item.height, item.depth)
+        if (item.kind === 'bed') {
+          this.box(room, this.straw, item.x, item.height + 0.08, item.z + 0.8, 1.75, 0.16, 1.3)
+          this.box(room, this.dark, item.x, item.height + 0.06, item.z - 0.4, 1.9, 0.12, 1.8)
+        }
         if (item.kind === 'forge') this.box(room, this.glow, item.x, item.height + 0.07, item.z, item.width * 0.65, 0.15, item.depth * 0.6)
         if (item.kind === 'shelf') for (let i = 0; i < 4; i++) this.box(room, this.straw, item.x, 0.4 + i * 0.5, item.z + item.depth / 2 + 0.02, item.width * 0.8, 0.08, 0.08)
       }

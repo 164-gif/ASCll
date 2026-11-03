@@ -1,8 +1,6 @@
 import type { MovementInput } from '../input/InputController'
 import {
   WORLD_LIMIT,
-  TOWN_BUILDINGS,
-  townBuildingDoor,
   type TownBuilding,
   bridgeDeckHeightAt,
   createWorldLandmarks,
@@ -43,8 +41,10 @@ export type PlayerState = {
   hurtPulse: number
 }
 
+import { FOREST_CAMP_OLD_MAN } from '../world/ForestCamp'
+import { ANOMALY_QUESTS, type QuestStatus } from '../world/Anomalies'
 import { environmentAt } from './EnvironmentState'
-import { INTERIOR_DEPTH, INTERIOR_WIDTH, INTERIOR_EXIT, INTERIOR_FURNITURE, RESIDENTS, pointInRect, settlementBlocked, type Resident } from '../world/Settlement'
+import { ENTERABLE_BUILDINGS, buildingEntrance, TENT_ELDER, TENT_BED, INTERIOR_DEPTH, INTERIOR_WIDTH, INTERIOR_EXIT, INTERIOR_FURNITURE, RESIDENTS, pointInRect, settlementBlocked, type Resident } from '../world/Settlement'
 
 export type ResidentState = Resident & { x: number; z: number; facing: number; waypoint: number; pause: number; walking: boolean }
 
@@ -70,6 +70,50 @@ export class WorldState {
   elapsed = 0
   kills = 0
   torchOn = true
+  readonly quests: Record<string, QuestStatus> = Object.fromEntries(ANOMALY_QUESTS.map((quest, index) => [quest.id, index === 0 ? 'available' : 'locked']))
+  notice = ''
+  noticeUntil = 0
+  get lanternPower(): number { return this.quests['broken-trace'] === 'completed' ? 1.3 : 1 }
+  get activeQuest() { return ANOMALY_QUESTS.find((quest) => ['active', 'surveyed'].includes(this.quests[quest.id]!)) }
+  get canTalkToElder(): boolean {
+    const location = this.interior?.kind === 'tent' ? TENT_ELDER : !this.interior ? FOREST_CAMP_OLD_MAN : null
+    return !!location && Math.hypot(this.player.x - location.x, this.player.z - location.z) < 2.4
+  }
+  get canRest(): boolean { return this.interior?.kind === 'tent' && Math.hypot(this.player.x - TENT_BED.x, this.player.z - TENT_BED.z) < 2.7 }
+
+  notify(text: string): void { this.notice = text; this.noticeUntil = this.elapsed + 6 }
+
+  acceptQuest(id: string): boolean {
+    if (!this.canTalkToElder || this.quests[id] !== 'available' || this.activeQuest) return false
+    this.quests[id] = 'active'
+    this.notify('Новое исследование · ' + ANOMALY_QUESTS.find((quest) => quest.id === id)!.title)
+    return true
+  }
+
+  inspectAnomaly(id: string): boolean {
+    const quest = ANOMALY_QUESTS.find((item) => item.id === id)
+    if (!quest || this.interior || this.player.hp <= 0 || this.quests[id] !== 'active' || Math.hypot(this.player.x - quest.x, this.player.z - quest.z) > 2.7) return false
+    this.quests[id] = 'surveyed'; this.notify('Наблюдение записано · вернись к страннику')
+    return true
+  }
+
+  completeQuest(id: string): boolean {
+    if (!this.canTalkToElder || this.quests[id] !== 'surveyed') return false
+    this.quests[id] = 'completed'
+    const index = ANOMALY_QUESTS.findIndex((quest) => quest.id === id)
+    const next = ANOMALY_QUESTS[index + 1]
+    if (next) this.quests[next.id] = 'available'
+    this.player.hp = 100; this.player.stamina = 100
+    this.notify('Исследование завершено · ' + ANOMALY_QUESTS[index]!.title)
+    return true
+  }
+
+  restInTent(): boolean {
+    if (!this.canRest) return false
+    this.player.hp = 100; this.player.stamina = 100; this.elapsed += 180
+    this.notify('Ты отдохнул · прошло три часа')
+    return true
+  }
 
   private deathTimer = 0
 
@@ -79,7 +123,7 @@ export class WorldState {
   }
 
   get currentZone(): WorldZone {
-    return this.interior ? { id: 'town', name: this.interior.name, x: 0, z: 0, radius: 10 } : zoneAt(this.player.x, this.player.z)
+    return this.interior ? { id: this.interior.kind === 'tent' ? 'forest' : 'town', name: this.interior.name, x: 0, z: 0, radius: 10 } : zoneAt(this.player.x, this.player.z)
   }
 
   get environment() { return environmentAt(this.elapsed) }
@@ -88,9 +132,9 @@ export class WorldState {
 
   enterBuilding(id: string): boolean {
     if (this.interior) return false
-    const building = TOWN_BUILDINGS.find((item) => item.id === id && item.kind !== 'house')
+    const building = ENTERABLE_BUILDINGS.find((item) => item.id === id)
     if (!building) return false
-    const door = townBuildingDoor(building)
+    const door = buildingEntrance(building)
     if (Math.hypot(this.player.x - door[0], this.player.z - door[1]) > 2.6) return false
     this.exterior = { x: this.player.x, z: this.player.z, facing: this.player.facing }
     this.interior = building
@@ -128,6 +172,7 @@ export class WorldState {
         const clear = (x: number, z: number): boolean => {
           if (Math.abs(x) > INTERIOR_WIDTH / 2 - 0.7 || Math.abs(z) > INTERIOR_DEPTH / 2 - 0.7) return false
           const kind = this.interior!.kind
+          if (kind === 'tent' && Math.hypot(x - TENT_ELDER.x, z - TENT_ELDER.z) < 0.8) return false
           return kind === 'house' || !INTERIOR_FURNITURE[kind].some((rect) => pointInRect(x, z, rect, PLAYER_RADIUS))
         }
         const nx = this.player.x + input.x * speed * dt

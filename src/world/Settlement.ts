@@ -1,7 +1,8 @@
+import { FOREST_CAMP_MAIN_TENT, FOREST_CAMP_TENT_ENTRY, FOREST_CAMP_ROTATION } from './ForestCamp'
 import { TOWN_BUILDINGS, TOWN_CENTER, TOWN_FIELDS, TOWN_WALL, type TownBuilding } from './WorldLayout'
 
 export type RectObstacle = { x: number; z: number; width: number; depth: number }
-export type Furniture = RectObstacle & { kind: 'table' | 'counter' | 'forge' | 'anvil' | 'shelf' | 'barrel'; height: number }
+export type Furniture = RectObstacle & { kind: 'table' | 'counter' | 'forge' | 'anvil' | 'shelf' | 'barrel' | 'bed'; height: number }
 export type InteriorKind = Exclude<TownBuilding['kind'], 'house'>
 export type Resident = {
   id: string; name: string; role: string; color: number; farmer: boolean
@@ -9,8 +10,23 @@ export type Resident = {
 }
 export const INTERIOR_WIDTH = 15
 export const INTERIOR_DEPTH = 13
+export const TENT_ELDER = { x: -3, z: -3.7 }
+export const TENT_BED = { x: -4.4, z: 1.3 }
+export const TENT_BUILDING: TownBuilding = { id: 'elder-tent', name: 'палатка странника', kind: 'tent', ...FOREST_CAMP_MAIN_TENT, rotation: FOREST_CAMP_ROTATION + 0.2, width: 6, depth: 7 }
+export const ENTERABLE_BUILDINGS = [...TOWN_BUILDINGS.filter((b) => b.kind !== 'house'), TENT_BUILDING]
+export function buildingEntrance(building: TownBuilding): readonly [number, number] {
+  if (building.kind === 'tent') return [FOREST_CAMP_TENT_ENTRY.x, FOREST_CAMP_TENT_ENTRY.z]
+  const localZ = -building.depth / 2 - 1.35
+  return [building.x + Math.sin(building.rotation) * localZ, building.z + Math.cos(building.rotation) * localZ]
+}
 export const INTERIOR_EXIT = { x: 0, z: 5.5 }
 export const INTERIOR_FURNITURE: Record<InteriorKind, readonly Furniture[]> = {
+  tent: [
+    { kind: 'bed', ...TENT_BED, width: 2.1, depth: 3.3, height: 0.35 },
+    { kind: 'table', x: 2.6, z: -2, width: 2.6, depth: 2.2, height: 0.85 },
+    { kind: 'shelf', x: 5.5, z: -4.7, width: 1.1, depth: 1.8, height: 1.6 },
+    { kind: 'barrel', x: 4.9, z: 2.9, width: 1.2, depth: 1.2, height: 0.75 },
+  ],
   inn: [
     { kind: 'counter', x: 0, z: -4.6, width: 9, depth: 1, height: 1.2 },
     { kind: 'table', x: -4, z: 0, width: 2.4, depth: 2.2, height: 0.9 },
@@ -35,19 +51,19 @@ export const INTERIOR_FURNITURE: Record<InteriorKind, readonly Furniture[]> = {
 
 export const RESIDENTS: readonly Resident[] = [
   { id: 'guard', name: 'Борис', role: 'страж ворот', color: 0x88998f, farmer: false,
-    route: [[-27.5, 88], [-22.5, 88]], lines: ['Седой Бор держится, пока стоят ворота. Проходи, путник.', 'Трактир — слева за воротами, кузница — справа. Ратуша в конце улицы.', 'За стенами не задерживайся после заката. Здесь мы хотя бы видим, что выходит из тумана.'] },
+    route: [[-27.5, 88], [-22.5, 88]], lines: ['Постой... Один идёшь? Ладно, проходи. В городе спокойно.', 'Трактир — слева за воротами, кузница — справа. Ратуша в конце улицы.', 'За стенами не задерживайся после заката. Здесь мы хотя бы видим, что выходит из тумана.'] },
   { id: 'innkeeper', name: 'Аглая', role: 'трактирщица', color: 0xa48563, farmer: false,
-    route: [[-32, 90.5], [-29, 90.5]], lines: ['Добро пожаловать в «Серый вепрь». Дверь всегда открыта.', 'Зайди внутрь: у очага тихо даже тогда, когда дождь бьёт по крыше.', 'У нас не спрашивают, откуда ты пришёл. Только куда собираешься дальше.'] },
+    route: [[-32, 90.5], [-29, 90.5]], lines: ['С дороги? Заходи в «Серый вепрь», согреешься. Только дверь за собой прикрой — тянет.', 'Зайди внутрь: у очага тихо даже тогда, когда дождь бьёт по крыше.', 'У нас не спрашивают, откуда ты пришёл. Только куда собираешься дальше.'] },
   { id: 'smith', name: 'Тихон', role: 'кузнец', color: 0x8d6254, farmer: false,
-    route: [[-18, 90], [-17.5, 93]], lines: ['Огонь, железо и терпение. Всё остальное город приносит сам.', 'В кузнице есть место у горна. Только не вставай между наковальней и верстаком.', 'Ворота чиним каждый сезон. То ржавчина, то следы, которых не оставляет ни один зверь.'] },
+    route: [[-18, 90], [-17.5, 93]], lines: ['Сейчас, дай докую... Всё. Слушаю тебя.', 'В кузнице есть место у горна. Только не вставай между наковальней и верстаком.', 'Ворота чиним каждый сезон. То ржавчина, то следы, которых не оставляет ни один зверь.'] },
   { id: 'elder', name: 'Мирон', role: 'староста', color: 0x839074, farmer: false,
-    route: [[-30, 110], [-29, 112]], lines: ['Видишь поля? Они кормят и город, и тех, кто держит стены.', 'В ратуше хранят карты старых дорог. Вход — прямо за мной.', 'Жители возвращаются к воротам до темноты. Привычка старше самой крепости.'] },
+    route: [[-30, 110], [-29, 112]], lines: ['Сойди с колеи, телега может пройти. Ты ко мне? Я Мирон, здешний староста.', 'В ратуше хранят карты старых дорог. Вход — прямо за мной.', 'Жители возвращаются к воротам до темноты. Привычка старше самой крепости.'] },
   { id: 'farmer-west', name: 'Фёдор', role: 'полевой работник', color: 0x9c9160, farmer: true,
-    route: [[-67, 96], [-67, 112]], lines: ['Земля ещё держит тепло. Значит, есть время закончить ряд.', 'Урожай общий. Часть в город, часть на семена, остальное — зиме.', 'По колее выйдешь к южным воротам. Через посевы тоже можно, только осторожнее.'] },
+    route: [[-67, 96], [-67, 112]], lines: ['Эй, аккуратнее с этим рядом, я его только поправил. Ты из города или с тракта?', 'Урожай общий. Часть в город, часть на семена, остальное — зиме.', 'По колее выйдешь к южным воротам. Через посевы тоже можно, только осторожнее.'] },
   { id: 'farmer-east', name: 'Дарья', role: 'жница', color: 0x879268, farmer: true,
-    route: [[18, 97], [18, 114]], lines: ['Рожь высокая в этом году. Дождя бы немного, да без холодного ветра.', 'С утра мы здесь. К вечеру поле становится совсем другим.', 'Дорогу найдёшь по следам телег. Они ведут к крепости.'] },
+    route: [[18, 97], [18, 114]], lines: ['Подожди, серп положу. Ну? Если ищешь дорогу, это я подскажу.', 'С утра мы здесь. К вечеру поле становится совсем другим.', 'Дорогу найдёшь по следам телег. Они ведут к крепости.'] },
   { id: 'potter', name: 'Лада', role: 'гончар', color: 0x9b7765, farmer: false,
-    route: [[-38, 105.5], [-33, 105.5]], lines: ['Глина помнит руки. Иногда это всё, что остаётся от человека.', 'Мой дом у северной стены. А кувшины стоят на площади — каждый немного кривой, зато свой.'] },
+    route: [[-38, 105.5], [-33, 105.5]], lines: ['Смотри под ноги, тут кувшины сохнут. Один уже разбили с утра. Что ищешь?', 'Мой дом у северной стены. А кувшины стоят на площади — каждый немного кривой, зато свой.'] },
 ]
 
 export function pointInRect(x: number, z: number, rect: RectObstacle, radius = 0): boolean {

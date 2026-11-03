@@ -28,7 +28,7 @@ export class InputController {
   }
 
   private readonly handlePointerDown = (event: PointerEvent): void => {
-    if (!this.enabled || event.button !== 0) return
+    if (!this.enabled || event.button !== 0 || (event.target instanceof Element && event.target.closest('button,[role=dialog]'))) return
     this.attackQueued = true
   }
 

@@ -29,6 +29,7 @@ import {
 } from './AsciiShaders'
 
 import { SettlementRenderer } from './SettlementRenderer'
+import { ExplorationRenderer } from './ExplorationRenderer'
 import { WeatherRenderer } from './WeatherRenderer'
 import { cultivatedAt } from '../../world/Settlement'
 
@@ -52,6 +53,7 @@ export class WorldRenderer {
   readonly element: HTMLCanvasElement
 
   private readonly settlement: SettlementRenderer
+  private readonly exploration: ExplorationRenderer
   private readonly weather: WeatherRenderer
   private lastInterior: string | null = null
   private readonly scene = new THREE.Scene()
@@ -144,6 +146,7 @@ export class WorldRenderer {
     this.buildKnight()
     this.settlement = new SettlementRenderer(this.scene, this.createAsciiMaterial.bind(this))
     this.weather = new WeatherRenderer(this.scene)
+    this.exploration = new ExplorationRenderer(this.scene, this.createAsciiMaterial.bind(this))
 
     this.resizeObserver = new ResizeObserver(this.resize)
     this.resizeObserver.observe(parent)
@@ -171,10 +174,11 @@ export class WorldRenderer {
     this.atmosphereUniforms.uSunDirection.value.set(Math.cos(environment.hour / 12 * Math.PI), 0.35 + environment.daylight, -0.45).normalize()
     this.settlement.update(world)
     this.weather.update(world)
+    this.exploration.update(world, dt)
     this.shared.uTime.value = world.elapsed
     this.shared.uPlayerPos.value.set(world.player.x, playerY, world.player.z)
 
-    const torchTarget = world.torchOn ? 1 : 0
+    const torchTarget = world.torchOn ? world.lanternPower : 0
     this.shared.uTorchPower.value += (torchTarget - this.shared.uTorchPower.value) * Math.min(1, dt * 4.5)
     this.torchPos.set(
       world.player.x + Math.sin(world.player.facing) * 0.45,
@@ -212,6 +216,7 @@ export class WorldRenderer {
     this.disposed = true
     this.resizeObserver.disconnect()
     this.weather.destroy()
+    this.exploration.destroy()
     for (const scene of [this.scene, this.settlement.interiorScene]) scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return
       object.geometry.dispose()

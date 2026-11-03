@@ -31,6 +31,10 @@ export class GameSession {
   private active = false
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    if (this.interaction.handleKey(event)) return
+    if (event.code === 'KeyJ' && !event.repeat && !this.map.isOpen) {
+      event.preventDefault(); this.interaction.toggleJournal(this.world); return
+    }
     if (event.code === 'KeyE' && !event.repeat && !this.map.isOpen) {
       event.preventDefault()
       this.interaction.interact(this.world)
@@ -85,6 +89,7 @@ export class GameSession {
     this.element = document.createElement('section')
     this.element.className = 'gameplay-root gameplay-root--entering'
     this.element.setAttribute('aria-label', 'Игровой мир')
+    this.element.tabIndex = -1
     parent.append(this.element)
 
     this.input = new InputController(this.element)

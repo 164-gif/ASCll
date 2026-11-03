@@ -1,3 +1,4 @@
+import { ANOMALY_QUESTS } from './Anomalies'
 export type LandmarkKind = 'monolith' | 'rock' | 'tree' | 'ruin' | 'gate' | 'tower'
 
 export type WorldLandmark = {
@@ -62,7 +63,7 @@ export type WorldStructure = {
 export type TownBuilding = {
   id: string
   name: string
-  kind: 'inn' | 'smithy' | 'house' | 'hall'
+  kind: 'inn' | 'smithy' | 'house' | 'hall' | 'tent'
   x: number
   z: number
   rotation: number
@@ -394,6 +395,7 @@ export function createWorldLandmarks(): WorldLandmark[] {
       const x = cx + Math.cos(angle) * radiusX * r
       const z = cz + Math.sin(angle) * radiusZ * r
       if (Math.hypot(x - cx, z - cz) < inner) continue
+      if (ANOMALY_QUESTS.some((site) => Math.hypot(x - site.x, z - site.z) < 4)) continue
       if (Math.abs(x) > WORLD_LIMIT - 4 || Math.abs(z) > WORLD_LIMIT - 4) continue
       if (z > 62 && z < 132 && x > -90 && x < 42) continue
       if (Math.abs(riverSignedDistance(x, z)) < RIVER_HALF_WIDTH + 2.8) continue

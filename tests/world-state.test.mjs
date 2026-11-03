@@ -82,3 +82,61 @@ test('weather lasts 3–5 minutes and transitions continuously', () => {
   assert.equal(environmentAt(750).rain, 0)
   assert.ok(Math.abs(environmentAt(450.01).fog - environmentAt(449.99).fog) < 0.001)
 })
+
+const { ANOMALY_QUESTS } = await import('../src/world/Anomalies.ts')
+const { FOREST_CAMP_OLD_MAN, FOREST_CAMP_TENT_ENTRY } = await import('../src/world/ForestCamp.ts')
+const { TENT_BED, TENT_ELDER } = await import('../src/world/Settlement.ts')
+
+test('three anomaly quests require acceptance, field observation and return; rewards are granted once', () => {
+  const world = new WorldState()
+  assert.equal(world.acceptQuest(ANOMALY_QUESTS[0].id), false)
+  assert.equal(world.acceptQuest('missing'), false)
+  for (const [index, quest] of ANOMALY_QUESTS.entries()) {
+    Object.assign(world.player, FOREST_CAMP_OLD_MAN)
+    assert.equal(world.completeQuest(quest.id), false)
+    assert.equal(world.acceptQuest(quest.id), true)
+    assert.equal(world.acceptQuest(quest.id), false)
+    if (index < 2) assert.equal(world.acceptQuest(ANOMALY_QUESTS[index + 1].id), false)
+    assert.equal(world.inspectAnomaly(quest.id), false)
+    Object.assign(world.player, { x: quest.x, z: quest.z })
+    assert.equal(world.inspectAnomaly(quest.id), true)
+    assert.equal(world.inspectAnomaly(quest.id), false)
+    assert.equal(world.completeQuest(quest.id), false)
+    Object.assign(world.player, FOREST_CAMP_OLD_MAN)
+    assert.equal(world.completeQuest(quest.id), true)
+    assert.equal(world.completeQuest(quest.id), false)
+    assert.equal(world.quests[quest.id], 'completed')
+  }
+  assert.equal(world.lanternPower, 1.3)
+  assert.equal(world.activeQuest, undefined)
+})
+
+test('elder tent is a walkable room, supports dialogue and rest, and restores exterior coordinates', () => {
+  const world = new WorldState()
+  Object.assign(world.player, FOREST_CAMP_TENT_ENTRY)
+  assert.equal(world.enterBuilding('elder-tent'), true)
+  advance(world, { x: 1, z: 0, running: false }, 0.5)
+  assert.ok(world.player.x > 1)
+  assert.equal(world.canTalkToElder, false)
+  Object.assign(world.player, { x: TENT_ELDER.x + 1.2, z: TENT_ELDER.z })
+  assert.equal(world.canTalkToElder, true)
+  assert.equal(world.acceptQuest(ANOMALY_QUESTS[0].id), true)
+  assert.equal(world.inspectAnomaly(ANOMALY_QUESTS[0].id), false)
+  Object.assign(world.player, { x: TENT_BED.x + 2, z: TENT_BED.z, hp: 20, stamina: 10 })
+  const before = world.elapsed
+  assert.equal(world.restInTent(), true)
+  assert.equal(world.player.hp, 100)
+  assert.equal(world.elapsed - before, 180)
+  Object.assign(world.player, { x: 0, z: 5.5 })
+  assert.equal(world.exitInterior(), true)
+  assert.equal(world.player.x, FOREST_CAMP_TENT_ENTRY.x)
+  assert.equal(world.player.z, FOREST_CAMP_TENT_ENTRY.z)
+  assert.equal(world.quests[ANOMALY_QUESTS[0].id], 'active')
+})
+
+test('anomaly observation areas are not buried inside generated obstacles', () => {
+  const world = new WorldState()
+  for (const quest of ANOMALY_QUESTS) for (const obstacle of world.trees) {
+    assert.ok(Math.hypot(quest.x - obstacle.x, quest.z - obstacle.z) > obstacle.radius + 0.42, quest.id)
+  }
+})
