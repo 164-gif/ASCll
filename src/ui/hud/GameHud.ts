@@ -49,7 +49,7 @@ export class GameHud {
     this.element.classList.toggle('game-hud--awakened', awakened)
     if (awakened) {
       this.objective.textContent = world.currentZone.name
-      this.environment.textContent = ''
+      this.environment.textContent = world.houseTime
       this.torch.textContent = world.house.lampOn ? 'свет включён' : 'свет выключен'
       this.quest.textContent = world.house.noteRead ? 'Знаки остались.\nJ · записи из сна' : 'На тумбочке у кровати лежит записка.'
       this.status.textContent = ''

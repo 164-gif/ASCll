@@ -1,3 +1,4 @@
+import { HouseControls } from './HouseControls'
 import type { ResidentState, WorldState } from '../../simulation/WorldState'
 import { ANOMALY_QUESTS, type AnomalyQuest } from '../../world/Anomalies'
 import { ENTERABLE_BUILDINGS, buildingEntrance } from '../../world/Settlement'
@@ -16,6 +17,7 @@ const STATUS_LABELS = { locked: 'пока недоступно', available: 'п�
 
 export class CampInteraction {
   readonly element: HTMLElement
+  private readonly houseControls: HouseControls
   private readonly prompt: HTMLButtonElement
   private readonly dialogue: HTMLElement
   private readonly journal: HTMLElement
@@ -36,7 +38,7 @@ export class CampInteraction {
   private choices: Choice[] = []
   private selected = 0
   private world: WorldState | null = null
-  private mode: 'none' | 'dialogue' | 'journal' = 'none'
+  private mode: 'none' | 'dialogue' | 'journal' | 'house' = 'none'
   private transitioning = false
   private timers: number[] = []
   private returnFocus: HTMLElement | null = null
@@ -88,6 +90,7 @@ export class CampInteraction {
     this.choiceList = this.element.querySelector<HTMLElement>('.camp-dialogue__choices')!
     this.element.addEventListener('click', this.handleClick)
     this.element.addEventListener('focusin', this.handleFocus)
+    this.houseControls = new HouseControls(this.element, () => this.close())
     parent.append(this.element)
   }
 
@@ -101,7 +104,7 @@ export class CampInteraction {
     if (this.isModal) { this.setPrompt(''); return }
     if (world.chapter === 'awakening') {
       const target = world.houseTarget
-      const action = target?.id === 'radio' ? world.house.radioOn ? 'выключить радио' : 'включить радио' : target?.id === 'television' ? world.house.tvOn ? 'выключить телевизор' : 'включить телевизор' : target?.id === 'door' ? world.house.doorOpen ? 'закрыть дверь' : 'открыть дверь' : target?.id === 'note' ? 'прочитать записку' : target?.id === 'lamp' ? world.house.lampOn ? 'погасить лампу' : 'зажечь лампу' : ''
+      const action = target?.id === 'radio' ? 'настроить радио' : target?.id === 'television' ? world.house.tvOn ? 'выключить телевизор' : 'включить телевизор' : target?.id === 'door' ? 'посмотреть в глазок' : target?.id === 'fridge' ? 'открыть холодильник' : target?.id === 'bed' ? 'лечь спать' : target?.id === 'note' ? 'прочитать записку' : target?.id === 'lamp' ? world.house.lampOn ? 'погасить лампу' : 'зажечь лампу' : ''
       this.setPrompt(action ? `E · ${action}` : '')
       return
     }
@@ -147,6 +150,7 @@ export class CampInteraction {
 
   handleKey(event: KeyboardEvent): boolean {
     if (!this.isModal) return false
+    if (this.mode === 'house') { this.houseControls.handleKey(event); return true }
     if (event.repeat) return true
     if (['Escape', 'KeyE', 'Enter', 'ArrowUp', 'ArrowDown', 'KeyJ', 'Space'].includes(event.code) || /^Digit[1-5]$/.test(event.code)) event.preventDefault()
     if (this.transitioning) return true
@@ -178,6 +182,8 @@ export class CampInteraction {
   close(): void {
     if (this.transitioning) return
     this.stopText()
+    this.houseControls.close()
+    if (this.world) this.world.house.fridgeOpen = false
     this.mode = 'none'
     for (const panel of [this.dialogue, this.journal]) { panel.classList.remove('is-open'); panel.setAttribute('aria-hidden', 'true'); panel.inert = true }
     if (this.returnFocus?.isConnected && !this.element.contains(this.returnFocus) && !this.returnFocus.closest('.main-menu--game-hidden')) this.returnFocus.focus({ preventScroll: true })
@@ -187,6 +193,7 @@ export class CampInteraction {
   }
 
   destroy(): void {
+    this.houseControls.destroy()
     this.stopText()
     for (const timer of this.timers) window.clearTimeout(timer)
     this.element.removeEventListener('click', this.handleClick)
@@ -320,20 +327,31 @@ export class CampInteraction {
 
   private interactHouse(world: WorldState): void {
     const target = world.houseTarget
-    if (!target || !world.useHouseObject(target.id)) return
+    if (!target) return
+    if (target.id === 'radio' || target.id === 'door') {
+      if (target.id === 'door' && !world.useHouseObject('door')) return
+      this.rememberFocus(); this.mode = 'house'
+      this.houseControls.open(world, target.id === 'radio' ? 'radio' : 'peephole'); this.changed(); return
+    }
+    if (!world.useHouseObject(target.id)) return
+    if (target.id === 'fridge') { this.openFridge(world); return }
+    if (target.id === 'bed') {
+      this.showDialogue('Кровать', 'Простыня всё ещё тёплая. Можно закрыть глаза. Только бы снова не оказаться в том лесу.', [
+        { label: 'Вздремнуть час.', run: () => { this.close(); this.changeScene('тиканье часов становится тише', () => world.sleepInHouse(1), true) } },
+        { label: 'Уснуть на шесть часов.', run: () => { this.close(); this.changeScene('где-то за стеной гудит приёмник', () => world.sleepInHouse(6), true) } },
+        { label: 'Пока не хочу спать.', run: () => this.close() },
+      ]); return
+    }
     if (target.id === 'note') {
       this.showDialogue('Записка · мой почерк', '«◌ ⋮ ∴»\n\nТри знака. Я только что видел их в лесу. Ниже написано: «Если снова проснёшься здесь — включи радио. Не доверяй тишине».', [{ label: 'Положить записку обратно.', run: () => this.close() }])
-    } else if (target.id === 'radio' && world.house.radioOn) {
-      this.showDialogue('Радио · 04:17', 'Между нотами слышен знакомый голос.\n\n«Передача продолжается. Не выключайте свет. Если вы видите знаки вместо вещей, не пытайтесь их стереть. Вы уже дома. Пока оставайтесь дома».', [
-        { label: 'Оставить радио включённым.', run: () => this.close() },
-        { label: 'Выключить.', run: () => { world.useHouseObject('radio'); this.close() } },
-      ])
-    } else if (target.id === 'television' && world.house.tvOn) {
-      this.showDialogue('Телевизор · экстренное вещание', 'На экране проступают те же три знака. Под ними строка: «ОСТАВАЙТЕСЬ ДОМА».\n\nИзображение собрано из символов. Как стены. Как моя кровать. Значит, дело было не только во сне.', [
-        { label: 'Оставить экран включённым.', run: () => this.close() },
-        { label: 'Выключить телевизор.', run: () => { world.useHouseObject('television'); this.close() } },
-      ])
-    } else world.notify(target.id === 'radio' ? 'Радио замолчало' : target.id === 'television' ? 'Экран погас' : target.id === 'door' ? world.house.doorOpen ? 'Снаружи тихо' : 'Дверь закрыта' : world.house.lampOn ? 'Лампа включена' : 'Лампа погасла')
+    } else world.notify(target.id === 'television' ? world.house.tvOn ? 'Телевизор включён · E выключить' : 'Экран погас' : world.house.lampOn ? 'Лампа включена' : 'Лампа погасла')
+  }
+
+  private openFridge(world: WorldState): void {
+    this.showDialogue('Холодильник', world.house.beer > 0 ? `На полке ${world.house.beer} ${world.house.beer === 1 ? 'бутылка' : 'бутылки'} пива. Стекло запотело. Больше здесь ничего нет.` : 'Пустая полка. Только круглые следы от бутылок.', [
+      ...(world.house.beer > 0 ? [{ label: 'Открыть бутылку и выпить.', run: () => { world.drinkBeer(); this.openFridge(world) } }] : []),
+      { label: 'Закрыть холодильник.', run: () => this.close() },
+    ])
   }
 
   private changeScene(label: string, action: () => boolean, waking = false): void {

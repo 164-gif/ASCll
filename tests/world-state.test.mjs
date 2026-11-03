@@ -194,14 +194,72 @@ test('radio, television and note need a nearby facing player and cannot be used 
   assert.equal(world.useHouseObject('note'), true); assert.equal(world.house.noteRead, true)
 })
 
-test('front door blocks walking until opened, then leads into the yard', () => {
+test('front door stays locked; the peephole suspends walking and preserves the indoor position', () => {
   const world = awakenedWorld()
   Object.assign(world.player, { x: 3.5, z: -5 }); world.house.yaw = 0
   advance(world, { x: 0, z: -1, running: false }, 1)
   assert.ok(world.player.z > -6.2)
+  const position = { x: world.player.x, z: world.player.z }
   assert.equal(world.useHouseObject('door'), true)
-  advance(world, { x: 0, z: -1, running: false }, 1.2)
-  assert.ok(world.player.z < -7.5)
+  assert.equal(world.house.peeking, true)
+  advance(world, { x: 0, z: -1, running: true }, 3)
+  assert.equal(world.player.z, position.z)
+  assert.equal(world.player.x, position.x)
+  world.house.peeking = false
+  advance(world, { x: 0, z: -1, running: true }, 5)
+  assert.ok(world.player.z > -6.2)
+})
+
+test('radio needs precise tuning and eight stable seconds before a meaningful transmission', () => {
+  const world = awakenedWorld()
+  assert.equal(world.radioSignal.quality, 0)
+  world.tuneRadio(126.4)
+  assert.ok(world.radioSignal.quality > 0.99)
+  world.updateHouseDevices(7.9); assert.equal(world.radioMessage, '')
+  world.updateHouseDevices(0.2); assert.match(world.radioMessage, /не открывай/)
+  world.tuneRadio(0.1, true); assert.equal(world.radioMessage, '')
+  world.updateHouseDevices(9); assert.match(world.radioMessage, /не открывай/)
+  world.tuneRadio(0.2, true); world.updateHouseDevices(12); assert.equal(world.radioMessage, '')
+  world.tuneRadio(1e9); assert.equal(world.radioFrequency, 1710)
+  world.tuneRadio(-1e9); world.tuneRadio(-1e9, true); assert.equal(world.radioFrequency, 530)
+  world.tuneRadio(206.4); world.house.radioOn = false; world.updateHouseDevices(20); assert.equal(world.radioMessage, '')
+})
+
+test('radio band includes interference, voices, screams and reserved music channels', async () => {
+  const { RADIO_STATIONS, radioReception } = await import('../src/world/HouseRadio.ts')
+  assert.equal(radioReception(550).station, undefined)
+  for (const station of RADIO_STATIONS) {
+    const reception = radioReception(station.frequency)
+    assert.equal(reception.station.id, station.id); assert.equal(reception.quality, 1)
+    assert.equal(radioReception(station.frequency + 4).quality, 0)
+  }
+  assert.deepEqual(new Set(RADIO_STATIONS.map(s => s.kind)), new Set(['voice', 'music', 'scream']))
+})
+
+test('fridge contains four finite beers and drinking requires being at the open fridge', () => {
+  const world = awakenedWorld()
+  assert.equal(world.drinkBeer(), false)
+  Object.assign(world.player, { x: -5.7, z: -4 }); world.house.yaw = 0
+  assert.equal(world.drinkBeer(), false)
+  assert.equal(world.useHouseObject('fridge'), true)
+  for (let i = 0; i < 4; i++) assert.equal(world.drinkBeer(), true)
+  assert.equal(world.house.beer, 0); assert.equal(world.house.beersDrunk, 4)
+  assert.equal(world.drinkBeer(), false)
+})
+
+test('sleep requires the bed, advances the house clock and restores health', () => {
+  const world = awakenedWorld()
+  Object.assign(world.player, { x: 3.5, z: -5 }); assert.equal(world.sleepInHouse(6), false)
+  Object.assign(world.player, { x: -4.5, z: 4.8 }); world.house.yaw = 0; world.house.pitch = -0.35
+  assert.equal(world.houseTarget?.id, 'bed')
+  const before = world.house.elapsed
+  world.player.hp = 30; world.player.stamina = 12
+  assert.equal(world.sleepInHouse(0), false)
+  assert.equal(world.sleepInHouse(6), true)
+  assert.equal(world.house.elapsed - before, 360)
+  assert.equal(world.player.hp, 100); assert.equal(world.player.stamina, 100)
+  assert.equal(world.house.sleepHours, 6)
+  assert.match(world.houseTime, /^10:/)
 })
 
 test('chapter selection starts directly in the house while a normal new game still starts in the valley', () => {

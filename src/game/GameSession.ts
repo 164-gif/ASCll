@@ -178,6 +178,7 @@ export class GameSession {
       this.accumulator = 0
     }
 
+    if (!document.hidden) this.world.updateHouseDevices(frameDt)
     this.audio.updateWorld(this.world, frameDt)
     this.renderer.render(this.world, frameDt)
     this.hud.update(this.world)

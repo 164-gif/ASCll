@@ -1,3 +1,4 @@
+import { HouseRadioAudio } from './HouseRadioAudio'
 import { AudioSettings, type AudioSettingsState } from '../core/AudioSettings'
 import type { WorldState } from '../simulation/WorldState'
 import { bridgeDeckHeightAt, isInsideRiver, riverSignedDistance } from '../world/WorldLayout'
@@ -37,8 +38,18 @@ export class AudioDirector {
   private previousHurtPulse = 0
   private previousTorch = true
   private nextCrackleAt = 0
-  private nextRadioToneAt = 0
-  private radioNote = 0
+  private houseRadio: HouseRadioAudio | null = null
+  private televisionGain: GainNode | null = null
+  private televisionSource: MediaElementAudioSourceNode | null = null
+  private readonly handleHouseVideo = (event: Event): void => {
+    this.televisionSource?.disconnect(); this.televisionSource = null
+    this.televisionGain?.disconnect(); this.televisionGain = null
+    const video = (event as CustomEvent<HTMLVideoElement | null>).detail
+    if (!video || !this.context || !this.worldSceneGain) return
+    const volume = this.context.createGain(); volume.gain.value = 0.24; this.televisionGain = volume
+    this.televisionSource = this.context.createMediaElementSource(video)
+    this.televisionSource.connect(volume).connect(this.worldSceneGain); video.muted = false
+  }
 
   private readonly handleSettings = (event: Event): void => {
     const custom = event as CustomEvent<AudioSettingsState>
@@ -51,6 +62,7 @@ export class AudioDirector {
   }
 
   constructor() {
+    window.addEventListener('ascii:house-video', this.handleHouseVideo)
     window.addEventListener('ascii:audio-settings', this.handleSettings)
     document.addEventListener('visibilitychange', this.handleVisibility)
   }
@@ -132,6 +144,7 @@ export class AudioDirector {
 
   enterMenu(): void {
     this.scene = 'menu'
+    this.houseRadio?.destroy(); this.houseRadio = null
     const context = this.context
     if (!context || !this.worldSceneGain || !this.musicSceneGain || !this.musicFilter) return
 
@@ -162,11 +175,8 @@ export class AudioDirector {
     if (world.chapter === 'awakening') {
       this.setTarget(this.riverGain, 0, 0.25); this.setTarget(this.windGain, 0, 0.25)
       this.setTarget(this.fireGain, 0, 0.25); this.setTarget(this.dangerGain, 0, 0.25)
-      if (world.house.radioOn && context.currentTime >= this.nextRadioToneAt) {
-        this.nextRadioToneAt = context.currentTime + 1.9
-        const frequency = [146.83, 174.61, 164.81, 130.81][this.radioNote++ % 4]!
-        this.playTone(frequency, frequency * 0.998, 0.8, 0.012, 'triangle')
-      }
+      if (!this.houseRadio && this.worldSceneGain && this.noiseBuffer) this.houseRadio = new HouseRadioAudio(context, this.worldSceneGain, this.noiseBuffer)
+      this.houseRadio?.update(world)
       if (moved > 0.001 && moved < 1) {
         this.footstepDistance += moved
         if (this.footstepDistance > 1.4) { this.footstepDistance = 0; this.playFootstep('stone', false) }
@@ -219,6 +229,9 @@ export class AudioDirector {
   }
 
   destroy(): void {
+    this.houseRadio?.destroy(); this.houseRadio = null
+    this.televisionSource?.disconnect(); this.televisionGain?.disconnect()
+    window.removeEventListener('ascii:house-video', this.handleHouseVideo)
     window.removeEventListener('ascii:audio-settings', this.handleSettings)
     document.removeEventListener('visibilitychange', this.handleVisibility)
     this.stopMenuScore(false)

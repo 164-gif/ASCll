@@ -1,3 +1,4 @@
+import { HOUSE_TV_VIDEO } from '../../audio/HouseMedia'
 import * as THREE from 'three'
 import type { WorldState } from '../../simulation/WorldState'
 import { HOUSE_FURNITURE, HOUSE_WALLS } from '../../world/WakingHouse'
@@ -7,6 +8,7 @@ uniform sampler2D uScene;
 uniform sampler2D uAtlas;
 uniform vec2 uResolution;
 uniform vec2 uCell;
+uniform float uPeeking;
 varying vec2 vUv;
 void main() {
   vec2 pixel = vUv * uResolution;
@@ -19,7 +21,11 @@ void main() {
   vec2 uv = (vec2(mod(index, 8.0), 7.0 - floor(index / 8.0)) + fract(pixel / uCell)) / 8.0;
   float glyph = texture2D(uAtlas, uv).r;
   vec3 paper = vec3(0.009, 0.012, 0.011) + color * 0.045;
-  gl_FragColor = vec4(mix(paper, color * 1.35, glyph), 1.0);
+  vec3 result = mix(paper, color * 1.35, glyph);
+  vec2 lens = (vUv - 0.5) * uResolution / min(uResolution.x, uResolution.y);
+  float aperture = 1.0 - smoothstep(0.31, 0.36, length(lens));
+  result *= mix(1.0, aperture, uPeeking);
+  gl_FragColor = vec4(result, 1.0);
 }
 `
 
@@ -39,6 +45,12 @@ export class AwakeningRenderer {
   private readonly radioLight: THREE.Mesh
   private readonly door = new THREE.Group()
   private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  private readonly video = document.createElement('video')
+  private videoTexture: THREE.VideoTexture | null = null
+  private playRequested = false
+  private readonly fridgeDoor = new THREE.Group()
+  private readonly bottles: THREE.Group[] = []
+  private readonly handleVisibility = (): void => { if (document.hidden) { this.video.pause(); this.playRequested = false } }
   private lastBroadcastFrame = -1
   private readonly post: THREE.ShaderMaterial
 
@@ -71,6 +83,13 @@ export class AwakeningRenderer {
     this.box(tv, dark, -0.08, 0.48, 0.44, 1.05, 0.76, 0.04)
     this.canvas.width = 512; this.canvas.height = 384
     this.televisionTexture = new THREE.CanvasTexture(this.canvas)
+    if (HOUSE_TV_VIDEO) {
+      this.video.src = HOUSE_TV_VIDEO; this.video.loop = true; this.video.playsInline = true; this.video.preload = 'none'
+      this.video.muted = true
+      this.videoTexture = new THREE.VideoTexture(this.video); this.videoTexture.colorSpace = THREE.SRGBColorSpace
+      window.dispatchEvent(new CustomEvent('ascii:house-video', { detail: this.video }))
+      document.addEventListener('visibilitychange', this.handleVisibility)
+    }
     const screenMaterial = new THREE.MeshBasicMaterial({ map: this.televisionTexture, color: 0xc5d6ce }); this.materials.add(screenMaterial)
     this.televisionScreen = this.box(tv, screenMaterial, -0.08, 0.49, 0.47, 0.9, 0.63, 0.012)
     for (const height of [0.29, 0.66]) this.box(tv, metal, 0.52, height, 0.46, 0.09, 0.09, 0.06)
@@ -98,7 +117,7 @@ export class AwakeningRenderer {
     this.post = new THREE.ShaderMaterial({
       vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position.xy,0.0,1.0);}',
       fragmentShader: asciiFragment,
-      uniforms: { uScene: { value: this.target.texture }, uAtlas: { value: atlas }, uResolution: { value: new THREE.Vector2(1, 1) }, uCell: { value: new THREE.Vector2(7, 11) } },
+      uniforms: { uScene: { value: this.target.texture }, uAtlas: { value: atlas }, uResolution: { value: new THREE.Vector2(1, 1) }, uCell: { value: new THREE.Vector2(7, 11) }, uPeeking: { value: 0 } },
       depthTest: false, depthWrite: false,
     })
     this.screenScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.post))
@@ -117,12 +136,25 @@ export class AwakeningRenderer {
     const eased = progress * progress * (3 - 2 * progress)
     this.camera.position.set(world.player.x, 0.72 + eased * 0.9, world.player.z)
     this.camera.rotation.set(house.pitch - (1 - eased) * 0.26, -house.yaw, 0, 'YXZ')
-    this.door.rotation.y += ((house.doorOpen ? Math.PI / 2 : 0) - this.door.rotation.y) * (this.reducedMotion ? 1 : Math.min(1, dt * 7))
+    if (house.peeking) {
+      this.camera.position.set(3.5, 1.65, -6.7); this.camera.rotation.set(0, 0, 0, 'YXZ')
+    }
+    const fov = house.peeking ? 100 : 67
+    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix() }
+    this.post.uniforms.uPeeking!.value = house.peeking ? 1 : 0
+    this.fridgeDoor.rotation.y += ((house.fridgeOpen ? -Math.PI * 0.62 : 0) - this.fridgeDoor.rotation.y) * (this.reducedMotion ? 1 : Math.min(1, dt * 7))
+    this.bottles.forEach((bottle, index) => { bottle.visible = index < house.beer })
     this.tableLamp.intensity = house.lampOn ? 10 : 0
     this.roomLights.forEach((light, index) => { light.intensity = house.lampOn ? index === 0 ? 5 : 4 : 0 })
     this.radioLight.visible = house.radioOn
     this.televisionScreen.visible = house.tvOn
     this.televisionLight.intensity = house.tvOn ? 3.5 : 0
+    if (HOUSE_TV_VIDEO && house.tvOn && !document.hidden && !this.playRequested) {
+      this.playRequested = true; void this.video.play().catch(() => { /* Keep the emergency broadcast if media cannot play. */ })
+    } else if ((!house.tvOn || document.hidden) && this.playRequested) { this.video.pause(); this.playRequested = false }
+    const screenMaterial = this.televisionScreen.material as THREE.MeshBasicMaterial
+    const map = this.video.readyState >= 2 && !this.video.error ? this.videoTexture : this.televisionTexture
+    if (screenMaterial.map !== map) { screenMaterial.map = map; screenMaterial.needsUpdate = true }
     const frame = Math.floor(house.elapsed * 8)
     if (house.tvOn && frame !== this.lastBroadcastFrame) { this.lastBroadcastFrame = frame; this.drawBroadcast(house.elapsed) }
     renderer.shadowMap.enabled = true
@@ -132,6 +164,9 @@ export class AwakeningRenderer {
   }
 
   destroy(): void {
+    document.removeEventListener('visibilitychange', this.handleVisibility)
+    this.video.pause(); this.video.removeAttribute('src'); this.video.load(); this.videoTexture?.dispose()
+    if (HOUSE_TV_VIDEO) window.dispatchEvent(new CustomEvent('ascii:house-video', { detail: null }))
     this.scene.traverse((object) => { if (object instanceof THREE.Mesh) object.geometry.dispose() })
     this.screenScene.traverse((object) => { if (object instanceof THREE.Mesh) object.geometry.dispose() })
     this.materials.forEach((material) => material.dispose()); this.post.dispose(); this.target.dispose(); this.televisionTexture.dispose()
@@ -171,6 +206,9 @@ export class AwakeningRenderer {
     }
     this.door.position.set(2.6, 0, -6.5)
     this.box(this.door, wood, 0.9, 1.18, 0, 1.8, 2.36, 0.16)
+    const peephole = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.014, 6, 12), this.material(0x9b9e86))
+    peephole.position.set(0.9, 1.65, 0.1); this.door.add(peephole)
+    this.box(this.door, dark, 0.9, 1.65, 0.089, 0.06, 0.06, 0.015)
     this.box(this.door, dark, 1.57, 1.05, 0.12, 0.1, 0.06, 0.1); this.scene.add(this.door)
     this.box(this.scene, wall, 3.5, 2.64, -6.5, 1.8, 0.52, 0.22)
     for (let x = -6.3; x < 6.5; x += 0.6) this.box(this.scene, dark, x, 0.008, 0, 0.015, 0.01, 13)
@@ -190,13 +228,33 @@ export class AwakeningRenderer {
         this.box(this.scene, fabric, item.x, 0.57, item.z + 0.48, item.width - 0.08, 0.15, 1.95)
         this.box(this.scene, pale, item.x, 0.62, item.z - 1.02, 1.2, 0.2, 0.54)
         this.box(this.scene, wood, item.x, 0.67, item.z - 1.5, item.width, 1.3, 0.15)
+      } else if (item.kind === 'fridge') {
+        // An actual hollow cabinet, shelves and a hinged door; the collision stays closed.
+        const x = item.x, z = item.z
+        this.box(this.scene, pale, x, 0.95, z - 0.49, 1.1, 1.9, 0.12)
+        for (const side of [-1, 1]) this.box(this.scene, pale, x + side * 0.5, 0.95, z, 0.1, 1.9, 1.1)
+        for (const y of [0.08, 0.55, 1.12, 1.84]) this.box(this.scene, pale, x, y, z, 1.1, 0.1, 1.1)
+        this.fridgeDoor.position.set(x - 0.55, 0, z + 0.55)
+        this.box(this.fridgeDoor, pale, 0.55, 0.95, 0, 1.1, 1.9, 0.1)
+        this.box(this.fridgeDoor, dark, 0.97, 1.05, 0.09, 0.045, 0.3, 0.08)
+        this.box(this.fridgeDoor, dark, 0.55, 1.4, 0.06, 1.05, 0.015, 0.025)
+        this.scene.add(this.fridgeDoor)
+        const brown = this.material(0x5b4228), label = this.material(0xb4b18c)
+        for (let i = 0; i < 4; i++) {
+          const bottle = new THREE.Group(); bottle.position.set(x - 0.34 + i * 0.22, 0.61, z + 0.15)
+          const body = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.08, 0.29, 10), brown); body.position.y = 0.145; bottle.add(body)
+          this.box(bottle, brown, 0, 0.33, 0, 0.07, 0.15, 0.07)
+          this.box(bottle, metal, 0, 0.41, 0, 0.09, 0.025, 0.09)
+          this.box(bottle, label, 0, 0.16, 0.073, 0.12, 0.12, 0.015)
+          this.bottles.push(bottle); this.scene.add(bottle)
+        }
       } else if (item.kind === 'sofa') {
         this.box(this.scene, fabric, item.x, 0.4, item.z, item.width, 0.65, item.depth)
         this.box(this.scene, fabric, item.x - 0.48, 0.76, item.z, 0.22, 1.1, item.depth)
         for (const side of [-1, 1]) this.box(this.scene, fabric, item.x, 0.7, item.z + side * 1.2, item.width, 0.35, 0.24)
       } else {
-        this.box(this.scene, item.kind === 'fridge' || item.kind === 'sink' ? pale : wood, item.x, y / 2, item.z, item.width, y, item.depth)
-        if (item.kind === 'wardrobe' || item.kind === 'fridge') {
+        this.box(this.scene, item.kind === 'sink' ? pale : wood, item.x, y / 2, item.z, item.width, y, item.depth)
+        if (item.kind === 'wardrobe') {
           this.box(this.scene, dark, item.x + item.width / 2 - 0.13, y * 0.55, item.z + item.depth / 2 + 0.04, 0.04, 0.22, 0.05)
           this.box(this.scene, dark, item.x, y * 0.72, item.z + item.depth / 2 + 0.015, item.width, 0.015, 0.025)
         }
@@ -229,6 +287,17 @@ export class AwakeningRenderer {
     this.box(this.scene, dark, 0, -0.11, -11.5, 34, 0.04, 3.6)
     for (let x = -15; x < 16; x += 4) this.box(this.scene, wall, x, -0.08, -11.5, 1.5, 0.025, 0.08)
     this.box(this.scene, wood, 3.5, -0.04, -7.7, 3.5, 0.08, 2.4)
+    // The house opposite sits in the peephole's limited view.
+    this.box(this.scene, wall, 3.5, 1.8, -18, 7, 3.6, 4)
+    for (const side of [-1, 1]) {
+      const roof = this.box(this.scene, dark, 3.5 + side * 1.8, 4.1, -18, 4.1, 0.18, 4.6)
+      roof.rotation.z = -side * 0.42
+    }
+    this.box(this.scene, wood, 3.5, 1.1, -15.96, 1.2, 2.2, 0.08)
+    for (const x of [1.3, 5.7]) {
+      this.box(this.scene, this.material(0x899383, 0x384333), x, 1.8, -15.95, 1.1, 1.2, 0.08)
+      this.box(this.scene, wood, x, 1.8, -15.88, 0.06, 1.2, 0.08)
+    }
     for (const side of [-1, 1]) {
       const group = new THREE.Group(); group.position.set(side * 10, 0, -15)
       this.box(group, wall, 0, 1.8, 0, 5, 3.6, 4)

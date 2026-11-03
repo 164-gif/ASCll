@@ -1,3 +1,4 @@
+import { radioReception, RADIO_MIN, RADIO_MAX, RADIO_LOCK_SECONDS } from '../world/HouseRadio'
 import type { MovementInput } from '../input/InputController'
 import {
   WORLD_LIMIT,
@@ -69,7 +70,11 @@ export class WorldState {
   readonly residents: ResidentState[] = RESIDENTS.map((resident) => ({ ...resident, x: resident.route[0]![0], z: resident.route[0]![1], facing: 0, waypoint: 1, pause: 1, walking: false }))
   chapter: GameChapter = 'valley'
   awakeningPending = false
-  readonly house = { yaw: 0, pitch: -0.08, elapsed: 0, radioOn: true, tvOn: false, lampOn: true, doorOpen: false, noteRead: false }
+  readonly house = {
+    yaw: 0, pitch: -0.08, elapsed: 0, radioOn: true, tvOn: false, lampOn: true,
+    peeking: false, fridgeOpen: false, beer: 4, beersDrunk: 0, sleepHours: 0,
+    radioFrequency: 610, radioFine: 0, radioSettled: 0, noteRead: false,
+  }
   interior: TownBuilding | null = null
   private exterior = { x: -0.5, z: 2.2, facing: 0 }
   elapsed = 0
@@ -131,7 +136,7 @@ export class WorldState {
   }
 
   get houseTarget() {
-    if (this.chapter !== 'awakening') return undefined
+    if (this.chapter !== 'awakening' || this.house.peeking) return undefined
     return HOUSE_OBJECTS.map((object) => ({ object, dx: object.x - this.player.x, dz: object.z - this.player.z }))
       .filter(({ object, dx, dz }) => {
         const dy = object.y - 1.62, distance = Math.hypot(dx, dy, dz)
@@ -147,9 +152,48 @@ export class WorldState {
     if (id === 'radio') this.house.radioOn = !this.house.radioOn
     if (id === 'television') this.house.tvOn = !this.house.tvOn
     if (id === 'lamp') this.house.lampOn = !this.house.lampOn
-    if (id === 'door') this.house.doorOpen = !this.house.doorOpen
+    if (id === 'door') this.house.peeking = true
+    if (id === 'fridge') this.house.fridgeOpen = true
     if (id === 'note') this.house.noteRead = true
     return true
+  }
+
+  tuneRadio(delta: number, fine = false): void {
+    if (this.chapter !== 'awakening' || !Number.isFinite(delta)) return
+    const previous = this.radioFrequency
+    if (fine) this.house.radioFine = Math.max(-12, Math.min(12, this.house.radioFine + delta))
+    else this.house.radioFrequency = Math.max(RADIO_MIN, Math.min(RADIO_MAX, this.house.radioFrequency + delta))
+    if (Math.abs(this.radioFrequency - previous) > 0.0001) this.house.radioSettled = 0
+  }
+
+  get radioFrequency(): number { return Math.max(RADIO_MIN, Math.min(RADIO_MAX, this.house.radioFrequency + this.house.radioFine)) }
+  get radioSignal() { return radioReception(this.radioFrequency) }
+  get radioMessage(): string {
+    return this.house.radioOn && this.house.radioSettled >= RADIO_LOCK_SECONDS ? this.radioSignal.station?.message ?? '' : ''
+  }
+  updateHouseDevices(dt: number): void {
+    if (this.chapter !== 'awakening') return
+    this.house.radioSettled = this.house.radioOn && this.radioSignal.quality > 0.72 ? this.house.radioSettled + Math.max(0, dt) : 0
+  }
+  drinkBeer(): boolean {
+    if (this.houseTarget?.id !== 'fridge' || !this.house.fridgeOpen || this.house.beer <= 0) return false
+    this.house.beer--; this.house.beersDrunk++
+    this.notify('Холодное пиво. На этикетке нет ни одного знакомого слова.')
+    return true
+  }
+  sleepInHouse(hours: number): boolean {
+    if (this.houseTarget?.id !== 'bed' || ![1, 6].includes(hours)) return false
+    this.house.sleepHours += hours
+    this.house.elapsed += hours * 60
+    this.elapsed += hours * 60
+    this.player.hp = 100; this.player.stamina = 100
+    this.house.radioSettled = 0
+    this.notify(`Ты проснулся. Прошло ${hours === 1 ? 'около часа' : 'шесть часов'}. За дверью всё ещё тихо.`)
+    return true
+  }
+  get houseTime(): string {
+    const minutes = Math.floor(257 + this.house.elapsed) % 1440
+    return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`
   }
 
   restInTent(): boolean {
@@ -207,13 +251,13 @@ export class WorldState {
     this.elapsed += dt
     if (this.chapter === 'awakening') {
       this.house.elapsed += dt
-      if (this.house.elapsed < 1.6) return
+      if (this.house.elapsed < 1.6 || this.house.peeking) return
       const speed = input.running ? 3.2 : 2.25
       const c = Math.cos(this.house.yaw), s = Math.sin(this.house.yaw)
       const dx = (input.x * c - input.z * s) * speed * dt
       const dz = (input.x * s + input.z * c) * speed * dt
-      if (!houseBlocked(this.player.x + dx, this.player.z, this.house.doorOpen)) this.player.x += dx
-      if (!houseBlocked(this.player.x, this.player.z + dz, this.house.doorOpen)) this.player.z += dz
+      if (!houseBlocked(this.player.x + dx, this.player.z)) this.player.x += dx
+      if (!houseBlocked(this.player.x, this.player.z + dz)) this.player.z += dz
       this.player.facing = Math.PI - this.house.yaw
       return
     }

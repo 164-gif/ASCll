@@ -1,4 +1,4 @@
-export type HouseObjectId = 'radio' | 'television' | 'note' | 'door' | 'lamp'
+export type HouseObjectId = 'radio' | 'television' | 'note' | 'door' | 'lamp' | 'fridge' | 'bed'
 export type HouseBox = { x: number; z: number; width: number; depth: number; height: number }
 export type HouseFurniture = HouseBox & { kind: 'bed' | 'sofa' | 'table' | 'cabinet' | 'fridge' | 'sink' | 'wardrobe' | 'chair' }
 
@@ -33,15 +33,15 @@ export const HOUSE_OBJECTS: readonly { id: HouseObjectId; x: number; y: number; 
   { id: 'radio', x: 0.8, y: 1.2, z: -5, label: 'радио' },
   { id: 'television', x: 5.1, y: 1.2, z: 1.5, label: 'телевизор' },
   { id: 'note', x: -2.8, y: 0.67, z: 2.05, label: 'записка у кровати' },
-  { id: 'door', x: 3.5, y: 1.2, z: -6.05, label: 'входная дверь' },
+  { id: 'door', x: 3.5, y: 1.65, z: -6.05, label: 'входная дверь' },
+  { id: 'fridge', x: -5.7, y: 1.2, z: -4.95, label: 'холодильник' },
+  { id: 'bed', x: -4.5, y: 0.6, z: 3.8, label: 'кровать' },
   { id: 'lamp', x: 4.6, y: 1.4, z: 4.95, label: 'настольная лампа' },
 ]
 
-export function houseBlocked(x: number, z: number, doorOpen: boolean, radius = 0.25): boolean {
-  if (x < -12.5 || x > 12.5 || z < -15 || z > 9.5) return true
-  const door: HouseBox = doorOpen
-    ? { x: 2.6, z: -7.4, width: 0.18, depth: 1.8, height: 2.4 }
-    : { x: 3.5, z: -6.5, width: 1.8, depth: 0.18, height: 2.4 }
+export function houseBlocked(x: number, z: number, radius = 0.25): boolean {
+  if (x < -6.5 + radius || x > 6.5 - radius || z < -6.5 + radius || z > 6.5 - radius) return true
+  const door: HouseBox = { x: 3.5, z: -6.5, width: 1.8, depth: 0.18, height: 2.4 }
   return [...HOUSE_WALLS, ...HOUSE_FURNITURE, door].some((box) => Math.abs(x - box.x) < box.width / 2 + radius && Math.abs(z - box.z) < box.depth / 2 + radius)
 }
 
