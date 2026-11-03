@@ -140,3 +140,66 @@ test('anomaly observation areas are not buried inside generated obstacles', () =
     assert.ok(Math.hypot(quest.x - obstacle.x, quest.z - obstacle.z) > obstacle.radius + 0.42, quest.id)
   }
 })
+
+function awakenedWorld() {
+  const world = new WorldState()
+  for (const quest of ANOMALY_QUESTS) world.quests[quest.id] = 'completed'
+  assert.equal(world.beginAwakening(true), true)
+  return world
+}
+
+test('awakening requires all three reports and can happen only once', () => {
+  const world = new WorldState()
+  assert.equal(world.beginAwakening(), false)
+  for (const quest of ANOMALY_QUESTS) {
+    Object.assign(world.player, FOREST_CAMP_OLD_MAN)
+    world.acceptQuest(quest.id)
+    Object.assign(world.player, { x: quest.x, z: quest.z }); world.inspectAnomaly(quest.id)
+    Object.assign(world.player, FOREST_CAMP_OLD_MAN); world.completeQuest(quest.id)
+  }
+  assert.equal(world.awakeningPending, true)
+  assert.equal(world.beginAwakening(true), true)
+  assert.equal(world.chapter, 'awakening')
+  assert.equal(world.interior, null)
+  assert.equal(world.awakeningPending, false)
+  assert.equal(world.beginAwakening(), false)
+  assert.equal(world.enterBuilding('elder-tent'), false)
+  assert.equal(world.canTalkToElder, false)
+})
+
+test('first-person walking follows viewing direction and solid room furniture blocks it', () => {
+  const world = awakenedWorld()
+  Object.assign(world.player, { x: 3.6, z: -1.5 }); world.house.yaw = Math.PI / 2
+  advance(world, { x: 0, z: -1, running: false }, 0.5)
+  assert.ok(world.player.x > 4.6)
+  assert.ok(Math.abs(world.player.z + 1.5) < 0.01)
+  Object.assign(world.player, { x: -4.5, z: 4.8 }); world.house.yaw = 0
+  advance(world, { x: 0, z: -1, running: false }, 2)
+  assert.ok(world.player.z > 4.3)
+})
+
+test('radio, television and note need a nearby facing player and cannot be used through a wall', () => {
+  const world = awakenedWorld()
+  assert.equal(world.useHouseObject('radio'), false)
+  Object.assign(world.player, { x: 0.8, z: -4 }); world.house.yaw = 0
+  assert.equal(world.houseTarget?.id, 'radio')
+  world.house.pitch = 1.1; assert.equal(world.useHouseObject('radio'), false); world.house.pitch = -0.08
+  assert.equal(world.useHouseObject('radio'), true); assert.equal(world.house.radioOn, false)
+  assert.equal(world.useHouseObject('radio'), true); assert.equal(world.house.radioOn, true)
+  Object.assign(world.player, { x: -1.1, z: -5 }); world.house.yaw = Math.PI / 2
+  assert.equal(world.useHouseObject('radio'), false)
+  Object.assign(world.player, { x: 4.2, z: 1.5 }); world.house.yaw = Math.PI / 2
+  assert.equal(world.useHouseObject('television'), true); assert.equal(world.house.tvOn, true)
+  Object.assign(world.player, { x: -1.8, z: 2.05 }); world.house.yaw = -Math.PI / 2
+  assert.equal(world.useHouseObject('note'), true); assert.equal(world.house.noteRead, true)
+})
+
+test('front door blocks walking until opened, then leads into the yard', () => {
+  const world = awakenedWorld()
+  Object.assign(world.player, { x: 3.5, z: -5 }); world.house.yaw = 0
+  advance(world, { x: 0, z: -1, running: false }, 1)
+  assert.ok(world.player.z > -6.2)
+  assert.equal(world.useHouseObject('door'), true)
+  advance(world, { x: 0, z: -1, running: false }, 1.2)
+  assert.ok(world.player.z < -7.5)
+})

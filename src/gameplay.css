@@ -304,3 +304,10 @@
 .game-hud__environment { color: rgba(207,196,162,.7); font-size: 9px; letter-spacing: .1em; padding-top: 6px; }
 .game-hud__quest { position:absolute; bottom:clamp(28px,5vh,60px); left:clamp(18px,2.6vw,42px); width:min(290px,75vw); white-space:pre-line; color:rgba(204,199,170,.7); font-size:10px; line-height:1.9; letter-spacing:.06em; }
 @media(max-width:600px) { .game-hud__quest { bottom:34px; font-size:9px; max-width:210px; } .game-hud__hint { display:none; } }
+.game-hud--awakened .game-hud__meter,.game-hud--awakened .game-hud__status>.game-hud__name:first-child { display:none; }
+.game-hud--awakened .game-hud__quest { color:#7a8980; font-size:9px; }
+.gameplay-root--awakened .world-glyph-canvas { cursor:grab; }
+.gameplay-root--awakened .world-glyph-canvas:active { cursor:grabbing; }
+.world-map--house .world-map__legend { visibility:hidden; }
+.world-map--house .world-map__legend::after { content:'· ты   ━ стены   ▪ мебель'; visibility:visible; color:#82998a; }
+.game-hud--awakened::before { content:''; position:absolute; inset:0; z-index:-1; background:linear-gradient(to bottom,rgba(0,0,0,.7),transparent 100px),linear-gradient(to top,rgba(0,0,0,.65),transparent 85px); }

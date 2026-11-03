@@ -1,3 +1,4 @@
+import { HOUSE_WALLS, HOUSE_FURNITURE } from '../../world/WakingHouse'
 import { ANOMALY_QUESTS } from '../../world/Anomalies'
 import type { WorldState } from '../../simulation/WorldState'
 import {
@@ -106,6 +107,9 @@ export class WorldMap {
   }
 
   update(world: WorldState): void {
+    this.openButton.textContent = world.chapter === 'awakening' ? 'M · план дома' : 'M · карта'
+    this.element.querySelector('.world-map__eyebrow')!.textContent = world.chapter === 'awakening' ? 'план дома · комнаты' : 'карта мира · северный тракт'
+    this.element.classList.toggle('world-map--house', world.chapter === 'awakening')
     if (this.open) this.draw(world)
   }
 
@@ -152,6 +156,8 @@ export class WorldMap {
   private draw(world: WorldState): void {
     const size = this.canvas.clientWidth
     if (size <= 0) return
+    this.element.querySelector('strong')!.textContent = world.chapter === 'awakening' ? 'небольшой дом' : 'лесная долина и Седой Бор'
+    if (world.chapter === 'awakening') { this.drawHouse(world, size); return }
     if (!this.staticLayer) this.staticLayer = this.buildStaticLayer(size)
 
     this.ctx.clearRect(0, 0, size, size)
@@ -159,6 +165,20 @@ export class WorldMap {
     this.drawActiveSector(world, size)
     this.drawQuests(world, size)
     this.drawActors(world, size)
+  }
+
+  private drawHouse(world: WorldState, size: number): void {
+    const ctx = this.ctx, scale = size / 19
+    const px = (x: number): number => size / 2 + x * scale
+    const pz = (z: number): number => size / 2 + z * scale
+    ctx.fillStyle = '#030604'; ctx.fillRect(0, 0, size, size)
+    for (const box of HOUSE_WALLS) { ctx.fillStyle = '#8b9b90'; ctx.fillRect(px(box.x - box.width / 2), pz(box.z - box.depth / 2), Math.max(2, box.width * scale), Math.max(2, box.depth * scale)) }
+    for (const item of HOUSE_FURNITURE) { ctx.fillStyle = '#293a30'; ctx.fillRect(px(item.x - item.width / 2), pz(item.z - item.depth / 2), item.width * scale, item.depth * scale) }
+    ctx.fillStyle = '#809487'; ctx.font = '10px monospace'; ctx.textAlign = 'center'
+    ctx.fillText('спальня', px(-3.5), pz(5.2)); ctx.fillText('кухня', px(-3.5), pz(-4)); ctx.fillText('гостиная', px(3.3), pz(-1.5))
+    ctx.save(); ctx.translate(px(world.player.x), pz(world.player.z)); ctx.rotate(world.house.yaw)
+    ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(5, 5); ctx.lineTo(-5, 5); ctx.closePath(); ctx.fillStyle = '#d1ded3'; ctx.fill(); ctx.restore()
+    ctx.textAlign = 'left'; ctx.fillStyle = '#7b8d80'; ctx.fillText('ты проснулся. но знаки остались.', 18, size - 20)
   }
 
   private buildStaticLayer(size: number): HTMLCanvasElement {

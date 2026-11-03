@@ -72,6 +72,7 @@ export class CampInteraction {
         </div>
       </div>
       <div class="world-transition" aria-hidden="true"><span></span></div>
+      <div class="house-reticle" aria-hidden="true">·</div>
       <div class="quest-toast" role="status" aria-live="polite"></div>`
     this.prompt = this.element.querySelector<HTMLButtonElement>('.camp-interaction__prompt')!
     this.dialogue = this.element.querySelector<HTMLElement>('.camp-dialogue')!
@@ -96,7 +97,14 @@ export class CampInteraction {
     this.world = world
     if (this.toast.textContent !== world.notice) this.toast.textContent = world.notice
     this.toast.classList.toggle('quest-toast--visible', !this.isModal && world.noticeUntil > world.elapsed)
+    this.element.querySelector('.house-reticle')!.classList.toggle('is-visible', world.chapter === 'awakening' && !this.isModal)
     if (this.isModal) { this.setPrompt(''); return }
+    if (world.chapter === 'awakening') {
+      const target = world.houseTarget
+      const action = target?.id === 'radio' ? world.house.radioOn ? 'выключить радио' : 'включить радио' : target?.id === 'television' ? world.house.tvOn ? 'выключить телевизор' : 'включить телевизор' : target?.id === 'door' ? world.house.doorOpen ? 'закрыть дверь' : 'открыть дверь' : target?.id === 'note' ? 'прочитать записку' : target?.id === 'lamp' ? world.house.lampOn ? 'погасить лампу' : 'зажечь лампу' : ''
+      this.setPrompt(action ? `E · ${action}` : '')
+      return
+    }
     if (world.canTalkToElder) { this.setPrompt('E · седой странник / поручения'); return }
     if (world.interior) {
       this.setPrompt(world.canExitInterior ? 'E · выйти наружу' : world.canRest ? 'E · отдохнуть на лежанке' : '')
@@ -115,6 +123,7 @@ export class CampInteraction {
     if (this.transitioning) return
     if (this.mode === 'dialogue') { if (this.typing) this.revealText(); else this.choose(this.selected); return }
     if (this.mode === 'journal') return
+    if (world.chapter === 'awakening') { this.interactHouse(world); return }
     if (world.canTalkToElder) { this.openElder(); return }
     if (world.interior) {
       if (world.canExitInterior) this.changeScene('наружу', () => world.exitInterior())
@@ -174,6 +183,7 @@ export class CampInteraction {
     if (this.returnFocus?.isConnected && !this.element.contains(this.returnFocus) && !this.returnFocus.closest('.main-menu--game-hidden')) this.returnFocus.focus({ preventScroll: true })
     else this.parent.focus({ preventScroll: true })
     this.returnFocus = null; this.changed()
+    if (this.world?.awakeningPending) this.changeScene('ты слышишь радио', () => this.world!.beginAwakening(this.reducedMotion), true)
   }
 
   destroy(): void {
@@ -202,6 +212,9 @@ export class CampInteraction {
     const choices: Choice[] = []
     if (current && world.quests[current.id] === 'surveyed') choices.push({ label: `Я нашёл место. Вот записи: «${current.title}»`, run: () => {
       if (!world.completeQuest(current.id)) return
+      if (world.awakeningPending) {
+        this.showDialogue('Седой · странник', `${current.report}\n\n${current.reward}`, [{ label: 'Я слышу... радио.', run: () => this.close() }]); return
+      }
       this.showDialogue('Седой · странник', `${current.report}\n\n${current.reward}`, [
         { label: 'Что-нибудь ещё нужно?', run: () => this.openElder() }, { label: 'До встречи у костра.', run: () => this.close() },
       ])
@@ -305,14 +318,33 @@ export class CampInteraction {
     this.journal.querySelector<HTMLButtonElement>('button')?.focus(); this.changed()
   }
 
-  private changeScene(label: string, action: () => boolean): void {
+  private interactHouse(world: WorldState): void {
+    const target = world.houseTarget
+    if (!target || !world.useHouseObject(target.id)) return
+    if (target.id === 'note') {
+      this.showDialogue('Записка · мой почерк', '«◌ ⋮ ∴»\n\nТри знака. Я только что видел их в лесу. Ниже написано: «Если снова проснёшься здесь — включи радио. Не доверяй тишине».', [{ label: 'Положить записку обратно.', run: () => this.close() }])
+    } else if (target.id === 'radio' && world.house.radioOn) {
+      this.showDialogue('Радио · 04:17', 'Между нотами слышен знакомый голос.\n\n«Передача продолжается. Не выключайте свет. Если вы видите знаки вместо вещей, не пытайтесь их стереть. Вы уже дома. Пока оставайтесь дома».', [
+        { label: 'Оставить радио включённым.', run: () => this.close() },
+        { label: 'Выключить.', run: () => { world.useHouseObject('radio'); this.close() } },
+      ])
+    } else if (target.id === 'television' && world.house.tvOn) {
+      this.showDialogue('Телевизор · экстренное вещание', 'На экране проступают те же три знака. Под ними строка: «ОСТАВАЙТЕСЬ ДОМА».\n\nИзображение собрано из символов. Как стены. Как моя кровать. Значит, дело было не только во сне.', [
+        { label: 'Оставить экран включённым.', run: () => this.close() },
+        { label: 'Выключить телевизор.', run: () => { world.useHouseObject('television'); this.close() } },
+      ])
+    } else world.notify(target.id === 'radio' ? 'Радио замолчало' : target.id === 'television' ? 'Экран погас' : target.id === 'door' ? world.house.doorOpen ? 'Снаружи тихо' : 'Дверь закрыта' : world.house.lampOn ? 'Лампа включена' : 'Лампа погасла')
+  }
+
+  private changeScene(label: string, action: () => boolean, waking = false): void {
     if (this.reducedMotion) { action(); this.changed(); return }
     this.transitioning = true; this.transition.querySelector('span')!.textContent = label
+    this.transition.classList.toggle('world-transition--awakening', waking)
     this.transition.classList.add('is-covering'); this.changed()
     this.timers.push(window.setTimeout(() => {
       action(); this.transition.classList.remove('is-covering')
-      this.timers.push(window.setTimeout(() => { this.transitioning = false; this.timers = []; this.changed() }, 260))
-    }, 180))
+      this.timers.push(window.setTimeout(() => { this.transitioning = false; this.timers = []; this.transition.classList.remove('world-transition--awakening'); this.changed() }, waking ? 1050 : 260))
+    }, waking ? 850 : 180))
   }
 
   private rememberFocus(): void { if (this.mode === 'none') { this.returnFocus = document.activeElement as HTMLElement; this.reply.textContent = '' } }

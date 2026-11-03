@@ -63,6 +63,7 @@ export class GameSession {
       return
     }
 
+    if (this.world.chapter === 'awakening' && document.pointerLockElement) { this.input.releasePointer(); return }
     this.onExit()
   }
 
@@ -146,6 +147,8 @@ export class GameSession {
 
   private readonly tick = (now: number): void => {
     if (!this.active) return
+    this.input.setFirstPerson(this.world.chapter === 'awakening')
+    this.element.classList.toggle('gameplay-root--awakened', this.world.chapter === 'awakening')
 
     const frameDt = Math.min(0.05, Math.max(0, (now - this.lastTime) / 1000))
     this.lastTime = now
@@ -153,8 +156,12 @@ export class GameSession {
 
     if (!this.map.isOpen && !this.interaction.isModal) {
       if (this.input.consumeTorchToggle()) this.world.toggleTorch()
-      if (this.input.consumeMacroZoom()) this.renderer.toggleMacroZoom()
-      this.renderer.adjustZoom(this.input.consumeZoomDelta())
+      if (this.world.chapter === 'awakening') {
+        const look = this.input.consumeLookDelta(frameDt); this.world.lookInHouse(look.x, look.y)
+      } else {
+        if (this.input.consumeMacroZoom()) this.renderer.toggleMacroZoom()
+        this.renderer.adjustZoom(this.input.consumeZoomDelta())
+      }
 
       const movement = this.input.movement()
       let attack = this.input.consumeAttack()

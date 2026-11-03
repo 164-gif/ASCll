@@ -43,6 +43,7 @@ export type PlayerState = {
 
 import { FOREST_CAMP_OLD_MAN } from '../world/ForestCamp'
 import { ANOMALY_QUESTS, type QuestStatus } from '../world/Anomalies'
+import { HOUSE_SPAWN, HOUSE_OBJECTS, houseSightClear, houseBlocked, houseRoomAt, type HouseObjectId } from '../world/WakingHouse'
 import { environmentAt } from './EnvironmentState'
 import { ENTERABLE_BUILDINGS, buildingEntrance, TENT_ELDER, TENT_BED, INTERIOR_DEPTH, INTERIOR_WIDTH, INTERIOR_EXIT, INTERIOR_FURNITURE, RESIDENTS, pointInRect, settlementBlocked, type Resident } from '../world/Settlement'
 
@@ -65,6 +66,9 @@ export class WorldState {
   readonly trees: WorldLandmark[] = []
   readonly enemies: EnemyState[] = []
   readonly residents: ResidentState[] = RESIDENTS.map((resident) => ({ ...resident, x: resident.route[0]![0], z: resident.route[0]![1], facing: 0, waypoint: 1, pause: 1, walking: false }))
+  chapter: 'valley' | 'awakening' = 'valley'
+  awakeningPending = false
+  readonly house = { yaw: 0, pitch: -0.08, elapsed: 0, radioOn: true, tvOn: false, lampOn: true, doorOpen: false, noteRead: false }
   interior: TownBuilding | null = null
   private exterior = { x: -0.5, z: 2.2, facing: 0 }
   elapsed = 0
@@ -76,6 +80,7 @@ export class WorldState {
   get lanternPower(): number { return this.quests['broken-trace'] === 'completed' ? 1.3 : 1 }
   get activeQuest() { return ANOMALY_QUESTS.find((quest) => ['active', 'surveyed'].includes(this.quests[quest.id]!)) }
   get canTalkToElder(): boolean {
+    if (this.chapter !== 'valley') return false
     const location = this.interior?.kind === 'tent' ? TENT_ELDER : !this.interior ? FOREST_CAMP_OLD_MAN : null
     return !!location && Math.hypot(this.player.x - location.x, this.player.z - location.z) < 2.4
   }
@@ -102,9 +107,47 @@ export class WorldState {
     this.quests[id] = 'completed'
     const index = ANOMALY_QUESTS.findIndex((quest) => quest.id === id)
     const next = ANOMALY_QUESTS[index + 1]
+    if (!next) this.awakeningPending = true
     if (next) this.quests[next.id] = 'available'
     this.player.hp = 100; this.player.stamina = 100
     this.notify('Исследование завершено · ' + ANOMALY_QUESTS[index]!.title)
+    return true
+  }
+
+  beginAwakening(skipIntro = false): boolean {
+    if (this.chapter !== 'valley' || !ANOMALY_QUESTS.every((quest) => this.quests[quest.id] === 'completed')) return false
+    this.chapter = 'awakening'; this.awakeningPending = false; this.interior = null
+    Object.assign(this.player, HOUSE_SPAWN, { hp: 100, stamina: 100, attackPulse: 0, hurtPulse: 0, facing: Math.PI })
+    this.house.elapsed = skipIntro ? 3 : 0
+    this.notice = ''; this.noticeUntil = 0
+    return true
+  }
+
+  lookInHouse(dx: number, dy: number): void {
+    if (this.chapter !== 'awakening') return
+    this.house.yaw = (this.house.yaw + dx * 0.0025) % (Math.PI * 2)
+    this.house.pitch = Math.max(-1.15, Math.min(1.15, this.house.pitch - dy * 0.0025))
+  }
+
+  get houseTarget() {
+    if (this.chapter !== 'awakening') return undefined
+    return HOUSE_OBJECTS.map((object) => ({ object, dx: object.x - this.player.x, dz: object.z - this.player.z }))
+      .filter(({ object, dx, dz }) => {
+        const dy = object.y - 1.62, distance = Math.hypot(dx, dy, dz)
+        const pitch = this.house.pitch, yaw = this.house.yaw
+        const alignment = (dx * Math.sin(yaw) * Math.cos(pitch) + dy * Math.sin(pitch) - dz * Math.cos(yaw) * Math.cos(pitch)) / distance
+        return distance < 2.1 && houseSightClear(this.player.x, this.player.z, object.x, object.z) && (distance < 0.55 || alignment > 0.55)
+      })
+      .sort((a, b) => Math.hypot(a.dx, a.dz) - Math.hypot(b.dx, b.dz))[0]?.object
+  }
+
+  useHouseObject(id: HouseObjectId): boolean {
+    if (this.houseTarget?.id !== id) return false
+    if (id === 'radio') this.house.radioOn = !this.house.radioOn
+    if (id === 'television') this.house.tvOn = !this.house.tvOn
+    if (id === 'lamp') this.house.lampOn = !this.house.lampOn
+    if (id === 'door') this.house.doorOpen = !this.house.doorOpen
+    if (id === 'note') this.house.noteRead = true
     return true
   }
 
@@ -123,6 +166,7 @@ export class WorldState {
   }
 
   get currentZone(): WorldZone {
+    if (this.chapter === 'awakening') return { id: 'wilds', name: houseRoomAt(this.player.x, this.player.z), x: 0, z: 0, radius: 15 }
     return this.interior ? { id: this.interior.kind === 'tent' ? 'forest' : 'town', name: this.interior.name, x: 0, z: 0, radius: 10 } : zoneAt(this.player.x, this.player.z)
   }
 
@@ -131,7 +175,7 @@ export class WorldState {
   get canExitInterior(): boolean { return !!this.interior && Math.hypot(this.player.x - INTERIOR_EXIT.x, this.player.z - INTERIOR_EXIT.z) < 2 }
 
   enterBuilding(id: string): boolean {
-    if (this.interior) return false
+    if (this.interior || this.chapter !== 'valley') return false
     const building = ENTERABLE_BUILDINGS.find((item) => item.id === id)
     if (!building) return false
     const door = buildingEntrance(building)
@@ -150,11 +194,24 @@ export class WorldState {
   }
 
   toggleTorch(): void {
+    if (this.chapter === 'awakening') { this.house.lampOn = !this.house.lampOn; return }
     this.torchOn = !this.torchOn
   }
 
   update(dt: number, input: MovementInput, attack: boolean): void {
     this.elapsed += dt
+    if (this.chapter === 'awakening') {
+      this.house.elapsed += dt
+      if (this.house.elapsed < 1.6) return
+      const speed = input.running ? 3.2 : 2.25
+      const c = Math.cos(this.house.yaw), s = Math.sin(this.house.yaw)
+      const dx = (input.x * c - input.z * s) * speed * dt
+      const dz = (input.x * s + input.z * c) * speed * dt
+      if (!houseBlocked(this.player.x + dx, this.player.z, this.house.doorOpen)) this.player.x += dx
+      if (!houseBlocked(this.player.x, this.player.z + dz, this.house.doorOpen)) this.player.z += dz
+      this.player.facing = Math.PI - this.house.yaw
+      return
+    }
     this.updateResidents(dt)
     this.player.attackPulse = Math.max(0, this.player.attackPulse - dt)
     this.player.hurtPulse = Math.max(0, this.player.hurtPulse - dt)

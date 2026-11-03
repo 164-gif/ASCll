@@ -28,6 +28,7 @@ import {
   objectVertexShader,
 } from './AsciiShaders'
 
+import { AwakeningRenderer } from './AwakeningRenderer'
 import { SettlementRenderer } from './SettlementRenderer'
 import { ExplorationRenderer } from './ExplorationRenderer'
 import { WeatherRenderer } from './WeatherRenderer'
@@ -52,6 +53,7 @@ type ObjectMaterial = THREE.ShaderMaterial & {
 export class WorldRenderer {
   readonly element: HTMLCanvasElement
 
+  private awakening: AwakeningRenderer | null = null
   private readonly settlement: SettlementRenderer
   private readonly exploration: ExplorationRenderer
   private readonly weather: WeatherRenderer
@@ -155,6 +157,15 @@ export class WorldRenderer {
 
   render(world: WorldState, dt: number): void {
     if (this.disposed) return
+    if (world.chapter === 'awakening') {
+      if (!this.awakening) {
+        this.awakening = new AwakeningRenderer(this.atlas)
+        const size = this.renderer.getSize(new THREE.Vector2())
+        this.awakening.resize(size.x, size.y, this.renderer.getPixelRatio())
+      }
+      this.awakening.render(this.renderer, world, dt)
+      return
+    }
 
     const interiorId = world.interior?.id ?? null
     const playerY = world.interior ? 0 : walkHeightAt(world.player.x, world.player.z)
@@ -215,6 +226,7 @@ export class WorldRenderer {
     if (this.disposed) return
     this.disposed = true
     this.resizeObserver.disconnect()
+    this.awakening?.destroy()
     this.weather.destroy()
     this.exploration.destroy()
     for (const scene of [this.scene, this.settlement.interiorScene]) scene.traverse((object) => {
@@ -1035,5 +1047,6 @@ export class WorldRenderer {
     this.camera.bottom = -BASE_FRUSTUM * 0.5
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(width, height, false)
+    this.awakening?.resize(width, height, this.renderer.getPixelRatio())
   }
 }

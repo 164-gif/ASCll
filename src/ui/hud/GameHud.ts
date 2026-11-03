@@ -45,6 +45,17 @@ export class GameHud {
   }
 
   update(world: WorldState): void {
+    const awakened = world.chapter === 'awakening'
+    this.element.classList.toggle('game-hud--awakened', awakened)
+    if (awakened) {
+      this.objective.textContent = world.currentZone.name
+      this.environment.textContent = ''
+      this.torch.textContent = world.house.lampOn ? 'свет включён' : 'свет выключен'
+      this.quest.textContent = world.house.noteRead ? 'Знаки остались.\nJ · записи из сна' : 'На тумбочке у кровати лежит записка.'
+      this.status.textContent = ''
+      this.element.querySelector('.game-hud__hint')!.textContent = 'WASD идти · мышь / стрелки осмотреться · E предмет · F лампа · M план · J записи'
+      return
+    }
     this.hp.style.transform = `scaleX(${Math.max(0, world.player.hp) / 100})`
     this.stamina.style.transform = `scaleX(${Math.max(0, world.player.stamina) / 100})`
     this.torch.textContent = world.torchOn ? 'f · light on' : 'f · light off'

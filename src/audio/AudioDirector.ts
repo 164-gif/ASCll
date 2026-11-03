@@ -37,6 +37,8 @@ export class AudioDirector {
   private previousHurtPulse = 0
   private previousTorch = true
   private nextCrackleAt = 0
+  private nextRadioToneAt = 0
+  private radioNote = 0
 
   private readonly handleSettings = (event: Event): void => {
     const custom = event as CustomEvent<AudioSettingsState>
@@ -156,6 +158,21 @@ export class AudioDirector {
     const speed = moved / safeDt
     this.lastPlayerX = world.player.x
     this.lastPlayerZ = world.player.z
+
+    if (world.chapter === 'awakening') {
+      this.setTarget(this.riverGain, 0, 0.25); this.setTarget(this.windGain, 0, 0.25)
+      this.setTarget(this.fireGain, 0, 0.25); this.setTarget(this.dangerGain, 0, 0.25)
+      if (world.house.radioOn && context.currentTime >= this.nextRadioToneAt) {
+        this.nextRadioToneAt = context.currentTime + 1.9
+        const frequency = [146.83, 174.61, 164.81, 130.81][this.radioNote++ % 4]!
+        this.playTone(frequency, frequency * 0.998, 0.8, 0.012, 'triangle')
+      }
+      if (moved > 0.001 && moved < 1) {
+        this.footstepDistance += moved
+        if (this.footstepDistance > 1.4) { this.footstepDistance = 0; this.playFootstep('stone', false) }
+      }
+      return
+    }
 
     const onBridge = bridgeDeckHeightAt(world.player.x, world.player.z) !== null
     const inWater = !world.interior && isInsideRiver(world.player.x, world.player.z) && !onBridge
