@@ -203,3 +203,17 @@ test('front door blocks walking until opened, then leads into the yard', () => {
   advance(world, { x: 0, z: -1, running: false }, 1.2)
   assert.ok(world.player.z < -7.5)
 })
+
+test('chapter selection starts directly in the house while a normal new game still starts in the valley', () => {
+  const house = new WorldState('awakening', true)
+  assert.equal(house.chapter, 'awakening')
+  assert.equal(house.awakeningPending, false)
+  assert.equal(house.activeQuest, undefined)
+  assert.equal(house.house.elapsed, 3)
+  assert.equal(house.currentZone.name, 'спальня')
+  assert.ok(Object.values(house.quests).every(status => status === 'completed'))
+  const valley = new WorldState()
+  assert.equal(valley.chapter, 'valley')
+  assert.equal(valley.quests['silent-bell'], 'available')
+  assert.equal(valley.beginAwakening(), false)
+})

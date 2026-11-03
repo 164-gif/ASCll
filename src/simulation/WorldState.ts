@@ -48,6 +48,7 @@ import { environmentAt } from './EnvironmentState'
 import { ENTERABLE_BUILDINGS, buildingEntrance, TENT_ELDER, TENT_BED, INTERIOR_DEPTH, INTERIOR_WIDTH, INTERIOR_EXIT, INTERIOR_FURNITURE, RESIDENTS, pointInRect, settlementBlocked, type Resident } from '../world/Settlement'
 
 export type ResidentState = Resident & { x: number; z: number; facing: number; waypoint: number; pause: number; walking: boolean }
+export type GameChapter = 'valley' | 'awakening'
 
 const PLAYER_RADIUS = 0.42
 const TREE_CLEARANCE = 0.08
@@ -66,7 +67,7 @@ export class WorldState {
   readonly trees: WorldLandmark[] = []
   readonly enemies: EnemyState[] = []
   readonly residents: ResidentState[] = RESIDENTS.map((resident) => ({ ...resident, x: resident.route[0]![0], z: resident.route[0]![1], facing: 0, waypoint: 1, pause: 1, walking: false }))
-  chapter: 'valley' | 'awakening' = 'valley'
+  chapter: GameChapter = 'valley'
   awakeningPending = false
   readonly house = { yaw: 0, pitch: -0.08, elapsed: 0, radioOn: true, tvOn: false, lampOn: true, doorOpen: false, noteRead: false }
   interior: TownBuilding | null = null
@@ -160,9 +161,13 @@ export class WorldState {
 
   private deathTimer = 0
 
-  constructor() {
+  constructor(initialChapter: GameChapter = 'valley', skipIntro = false) {
     this.trees.push(...createWorldLandmarks())
     this.spawnEnemies()
+    if (initialChapter === 'awakening') {
+      for (const quest of ANOMALY_QUESTS) this.quests[quest.id] = 'completed'
+      this.beginAwakening(skipIntro)
+    }
   }
 
   get currentZone(): WorldZone {

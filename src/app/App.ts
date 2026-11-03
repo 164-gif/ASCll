@@ -6,6 +6,7 @@ import { GlyphBackdrop } from '../render/menu/GlyphBackdrop'
 import { BootSequence } from '../ui/boot/BootSequence'
 import { EntryGate } from '../ui/entry/EntryGate'
 import { MainMenu } from '../ui/menu/MainMenu'
+import type { GameChapter } from '../simulation/WorldState'
 
 export class App {
   private readonly shell: HTMLDivElement
@@ -16,11 +17,12 @@ export class App {
   private readonly boot: BootSequence
   private readonly entry: EntryGate
   private session: GameSession | null = null
+  private worldStartTimer = 0
 
   private readonly handleNewGame = (): void => {
-    this.audio.beginWorldTransition()
     this.enterWorld()
   }
+  private readonly handleChapterTwo = (): void => { this.enterWorld('awakening') }
 
   constructor(root: HTMLElement) {
     this.shell = document.createElement('div')
@@ -34,6 +36,7 @@ export class App {
     this.entry = new EntryGate(this.shell)
 
     window.addEventListener('ascii:new-game', this.handleNewGame)
+    window.addEventListener('ascii:start-chapter-two', this.handleChapterTwo)
   }
 
   async start(): Promise<void> {
@@ -50,6 +53,9 @@ export class App {
 
   destroy(): void {
     window.removeEventListener('ascii:new-game', this.handleNewGame)
+    window.removeEventListener('ascii:start-chapter-two', this.handleChapterTwo)
+    if (this.worldStartTimer) window.clearTimeout(this.worldStartTimer)
+    this.worldStartTimer = 0
     this.session?.destroy()
     this.session = null
     this.entry.destroy()
@@ -61,16 +67,18 @@ export class App {
     this.shell.remove()
   }
 
-  private enterWorld(): void {
-    if (this.session) return
+  private enterWorld(chapter: GameChapter = 'valley'): void {
+    if (this.session || this.worldStartTimer) return
+    this.audio.beginWorldTransition()
 
     this.menu.setActive(false)
     this.menu.element.classList.add('main-menu--game-hidden')
     this.backdrop.element.classList.add('glyph-backdrop--game-hidden')
 
-    window.setTimeout(() => {
+    this.worldStartTimer = window.setTimeout(() => {
+      this.worldStartTimer = 0
       if (this.session) return
-      this.session = new GameSession(this.shell, this.audio, () => this.leaveWorld())
+      this.session = new GameSession(this.shell, this.audio, () => this.leaveWorld(), chapter)
       this.session.start()
     }, 1120)
   }

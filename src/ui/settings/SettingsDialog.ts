@@ -45,6 +45,14 @@ export class SettingsDialog {
           </div>
         </section>
 
+        <section class="settings-section" aria-labelledby="settings-game-title">
+          <h3 id="settings-game-title">Игра</h3>
+          <div class="setting-line setting-line--action">
+            <span>Пробуждение в доме</span>
+            <button class="setting-text-button" type="button" data-start-chapter-two>Начать со 2 главы</button>
+          </div>
+        </section>
+
         <footer class="settings-footer">
           <span>Изменения сохраняются автоматически</span>
           <button class="settings-done" value="default">Готово</button>
@@ -114,6 +122,10 @@ export class SettingsDialog {
     muteHidden?.addEventListener('change', () => this.audio.update({ muteWhenHidden: muteHidden.checked }))
     motion?.addEventListener('change', () => this.onMotionPreference(motion.checked))
     fullscreenButton?.addEventListener('click', () => void this.fullscreen.toggle())
+    this.element.querySelector('[data-start-chapter-two]')?.addEventListener('click', () => {
+      this.element.close()
+      window.dispatchEvent(new Event('ascii:start-chapter-two'))
+    })
 
     this.unsubscribeFullscreen = this.fullscreen.subscribe((active) => {
       if (fullscreenButton) fullscreenButton.textContent = active ? 'ВЫКЛЮЧИТЬ' : 'ВКЛЮЧИТЬ'

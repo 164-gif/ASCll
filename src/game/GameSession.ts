@@ -5,7 +5,7 @@ import type { AudioDirector } from '../audio/AudioDirector'
 import { InputController } from '../input/InputController'
 import { WorldRenderer } from '../render/world/WorldRenderer'
 import { ForestCampEnhancer } from '../render/world/ForestCampEnhancer'
-import { WorldState } from '../simulation/WorldState'
+import { WorldState, type GameChapter } from '../simulation/WorldState'
 import { CampInteraction } from '../ui/camp/CampInteraction'
 import { GameHud } from '../ui/hud/GameHud'
 import { WorldMap } from '../ui/map/ReadableWorldMap'
@@ -16,7 +16,7 @@ export class GameSession {
   readonly element: HTMLElement
 
   private readonly input: InputController
-  private readonly world = new WorldState()
+  private readonly world: WorldState
   private readonly renderer: WorldRenderer
   private readonly campEnhancer: ForestCampEnhancer
   private readonly hud: GameHud
@@ -84,16 +84,19 @@ export class GameSession {
     this.accumulator = 0
   }
 
-  constructor(parent: HTMLElement, audio: AudioDirector, onExit: () => void) {
+  constructor(parent: HTMLElement, audio: AudioDirector, onExit: () => void, chapter: GameChapter = 'valley') {
+    this.world = new WorldState(chapter, window.matchMedia('(prefers-reduced-motion: reduce)').matches)
     this.audio = audio
     this.onExit = onExit
     this.element = document.createElement('section')
     this.element.className = 'gameplay-root gameplay-root--entering'
+    this.element.classList.toggle('gameplay-root--awakened', chapter === 'awakening')
     this.element.setAttribute('aria-label', 'Игровой мир')
     this.element.tabIndex = -1
     parent.append(this.element)
 
     this.input = new InputController(this.element)
+    this.input.setFirstPerson(chapter === 'awakening')
     this.renderer = new WorldRenderer(this.element, this.world)
     this.campEnhancer = new ForestCampEnhancer(this.renderer)
     this.hud = new GameHud(this.element)
