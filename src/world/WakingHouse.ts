@@ -1,5 +1,5 @@
 export const HOUSE_TV_CHANNEL_COUNT = 3
-export type HouseObjectId = 'radio' | 'television' | 'note' | 'door' | 'lamp' | 'fridge' | 'bed'
+export type HouseObjectId = 'radio' | 'television' | 'note' | 'door' | 'lamp' | 'fridge' | 'bed' | 'phone' | 'sofa' | 'window-bedroom' | 'window-living' | 'wardrobe-bedroom' | 'wardrobe-living'
 export type HouseBox = { x: number; z: number; width: number; depth: number; height: number }
 export type HouseFurniture = HouseBox & { kind: 'bed' | 'sofa' | 'table' | 'cabinet' | 'fridge' | 'sink' | 'wardrobe' | 'chair' }
 
@@ -19,6 +19,7 @@ export const HOUSE_WALLS: readonly HouseBox[] = [
 export const HOUSE_FURNITURE: readonly HouseFurniture[] = [
   { kind: 'bed', x: -4.5, z: 2.6, width: 2.1, depth: 3, height: 0.48 },
   { kind: 'table', x: -2.8, z: 1.7, width: 0.65, depth: 0.7, height: 0.65 },
+  { kind: 'wardrobe', x: 5.8, z: -4.75, width: 1.0, depth: 1.45, height: 2.3 },
   { kind: 'wardrobe', x: -5.45, z: 5.8, width: 1.8, depth: 0.7, height: 2.3 },
   { kind: 'sofa', x: 1.3, z: 2.5, width: 1.1, depth: 2.6, height: 0.7 },
   { kind: 'table', x: 3.3, z: 2.5, width: 1.1, depth: 1.8, height: 0.46 },
@@ -31,12 +32,18 @@ export const HOUSE_FURNITURE: readonly HouseFurniture[] = [
   { kind: 'chair', x: -4.4, z: -0.9, width: 0.55, depth: 0.55, height: 0.45 },
 ]
 export const HOUSE_OBJECTS: readonly { id: HouseObjectId; x: number; y: number; z: number; label: string }[] = [
+  { id: 'sofa', x: 1.85, y: 0.7, z: 2.5, label: 'диван' },
+  { id: 'window-bedroom', x: -6.15, y: 1.6, z: 3.2, label: 'окно спальни' },
+  { id: 'window-living', x: 6.15, y: 1.6, z: -2.5, label: 'окно гостиной' },
+  { id: 'wardrobe-bedroom', x: -5.45, y: 1.35, z: 5.35, label: 'шкаф' },
+  { id: 'wardrobe-living', x: 5.15, y: 1.35, z: -4.75, label: 'шкаф' },
   { id: 'radio', x: 0.8, y: 1.2, z: -5, label: 'радио' },
   { id: 'television', x: 5.1, y: 1.2, z: 1.5, label: 'телевизор' },
   { id: 'note', x: -2.8, y: 0.67, z: 2.05, label: 'записка у кровати' },
   { id: 'door', x: 3.5, y: 1.65, z: -6.05, label: 'входная дверь' },
   { id: 'fridge', x: -5.7, y: 1.2, z: -4.95, label: 'холодильник' },
   { id: 'bed', x: -4.5, y: 0.6, z: 3.8, label: 'кровать' },
+  { id: 'phone', x: 3.65, y: 1.05, z: 5.0, label: 'телефон' },
   { id: 'lamp', x: 4.6, y: 1.4, z: 4.95, label: 'настольная лампа' },
 ]
 

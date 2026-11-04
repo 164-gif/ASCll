@@ -39,6 +39,7 @@ export class AudioDirector {
   private previousHurtPulse = 0
   private previousTorch = true
   private nextCrackleAt = 0
+  private nextTypingAt = 0
   private houseRadio: HouseRadioAudio | null = null
   private televisionVideo: HTMLVideoElement | null = null
   private readonly televisionAudio = document.createElement('audio')
@@ -146,6 +147,30 @@ export class AudioDirector {
     this.applySettings(true)
     await this.loadMenuScore()
     if (this.scene === 'menu') this.startMenuScore()
+  }
+
+  dialogueTyping(): void {
+    const context = this.context
+    if (!context || context.currentTime < this.nextTypingAt) return
+    this.nextTypingAt = context.currentTime + 0.075
+    const frequency = 760 + Math.random() * 130
+    this.playTone(frequency, frequency * 0.92, 0.025, 0.009, 'sine')
+  }
+
+  phoneSound(kind: string, digit?: string): void {
+    if (kind === 'typing') { this.dialogueTyping(); return }
+    if (kind === 'digit') {
+      const keys = ['123', '456', '789', '*0#']
+      const row = keys.findIndex((line) => line.includes(digit ?? ''))
+      const col = row < 0 ? -1 : keys[row]!.indexOf(digit ?? '')
+      if (row < 0 || col < 0) return
+      const low = [697, 770, 852, 941][row]!, high = [1209, 1336, 1477][col]!
+      this.playTone(low, low, 0.09, 0.018, 'sine'); this.playTone(high, high, 0.09, 0.012, 'sine')
+    } else if (kind === 'ring') {
+      this.playTone(425, 425, 0.65, 0.022, 'sine')
+    } else if (kind === 'lift' || kind === 'hangup') {
+      this.playTone(kind === 'lift' ? 480 : 230, kind === 'lift' ? 320 : 120, 0.08, 0.018, 'triangle')
+    }
   }
 
   entryConfirm(): void {

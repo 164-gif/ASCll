@@ -289,3 +289,13 @@ test('television channels require a nearby powered-on television and wrap around
   Object.assign(world.player, { x: 0, z: 0 })
   assert.equal(world.nextTelevisionChannel(), false)
 })
+
+
+test('telephone can only be picked up nearby while looking at it', () => {
+  const world = awakenedWorld()
+  assert.equal(world.useHouseObject('phone'), false)
+  Object.assign(world.player, { x: 3.65, z: 4 }); world.house.yaw = Math.PI; world.house.pitch = -0.35
+  assert.equal(world.houseTarget?.id, 'phone')
+  assert.equal(world.useHouseObject('phone'), true)
+  assert.equal(world.house.phoneLifted, true)
+})

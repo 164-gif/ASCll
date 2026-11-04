@@ -1,3 +1,4 @@
+import { HousePhone } from './HousePhone'
 import { HouseControls } from './HouseControls'
 import type { ResidentState, WorldState } from '../../simulation/WorldState'
 import { ANOMALY_QUESTS, type AnomalyQuest } from '../../world/Anomalies'
@@ -18,6 +19,7 @@ const STATUS_LABELS = { locked: 'пока недоступно', available: 'п�
 export class CampInteraction {
   readonly element: HTMLElement
   private readonly houseControls: HouseControls
+  private readonly housePhone: HousePhone
   private readonly prompt: HTMLButtonElement
   private readonly dialogue: HTMLElement
   private readonly journal: HTMLElement
@@ -38,7 +40,7 @@ export class CampInteraction {
   private choices: Choice[] = []
   private selected = 0
   private world: WorldState | null = null
-  private mode: 'none' | 'dialogue' | 'journal' | 'house' = 'none'
+  private mode: 'none' | 'dialogue' | 'journal' | 'house' | 'phone' = 'none'
   private transitioning = false
   private timers: number[] = []
   private returnFocus: HTMLElement | null = null
@@ -92,6 +94,7 @@ export class CampInteraction {
     this.element.addEventListener('click', this.handleClick)
     this.element.addEventListener('focusin', this.handleFocus)
     this.houseControls = new HouseControls(this.element, () => this.close())
+    this.housePhone = new HousePhone(this.element, () => this.close(), (detail) => this.element.dispatchEvent(new CustomEvent('interaction:phone-sound', { detail, bubbles: true })))
     parent.append(this.element)
   }
 
@@ -108,7 +111,7 @@ export class CampInteraction {
     if (this.isModal) { this.setPrompt(''); return }
     if (world.chapter === 'awakening') {
       const target = world.houseTarget
-      const action = target?.id === 'radio' ? 'настроить радио' : target?.id === 'television' ? world.house.tvOn ? 'выключить телевизор' : 'включить телевизор' : target?.id === 'door' ? 'посмотреть в глазок' : target?.id === 'fridge' ? 'открыть холодильник' : target?.id === 'bed' ? 'лечь спать' : target?.id === 'note' ? 'прочитать записку' : target?.id === 'lamp' ? world.house.lampOn ? 'погасить лампу' : 'зажечь лампу' : ''
+      const action = target?.id === 'phone' ? 'снять трубку' : target?.id === 'radio' ? 'настроить радио' : target?.id === 'television' ? world.house.tvOn ? 'выключить телевизор' : 'включить телевизор' : target?.id === 'door' ? 'посмотреть в глазок' : target?.id === 'fridge' ? 'открыть холодильник' : target?.id === 'bed' ? 'лечь спать' : target?.id === 'note' ? 'прочитать записку' : target?.id === 'lamp' ? world.house.lampOn ? 'погасить лампу' : 'зажечь лампу' : ''
       this.setPrompt(action ? `E · ${action}` : '')
       return
     }
@@ -155,6 +158,7 @@ export class CampInteraction {
   handleKey(event: KeyboardEvent): boolean {
     if (!this.isModal) return false
     if (this.mode === 'house') { this.houseControls.handleKey(event); return true }
+    if (this.mode === 'phone') { this.housePhone.handleKey(event); return true }
     if (event.repeat) return true
     if (['Escape', 'KeyE', 'Enter', 'ArrowUp', 'ArrowDown', 'KeyJ', 'Space'].includes(event.code) || /^Digit[1-5]$/.test(event.code)) event.preventDefault()
     if (this.transitioning) return true
@@ -187,6 +191,7 @@ export class CampInteraction {
     if (this.transitioning) return
     this.stopText()
     this.houseControls.close()
+    this.housePhone.close()
     if (this.world) this.world.house.fridgeOpen = false
     this.mode = 'none'
     for (const panel of [this.dialogue, this.journal]) { panel.classList.remove('is-open'); panel.setAttribute('aria-hidden', 'true'); panel.inert = true }
@@ -198,6 +203,7 @@ export class CampInteraction {
 
   destroy(): void {
     this.houseControls.destroy()
+    this.housePhone.destroy()
     this.stopText()
     for (const timer of this.timers) window.clearTimeout(timer)
     this.element.removeEventListener('click', this.handleClick)
@@ -284,11 +290,13 @@ export class CampInteraction {
     if (this.reducedMotion) { this.revealText(); return }
     let count = 0, next = performance.now() + 65
     const tick = (now: number): void => {
+      const previous = count
       while (now >= next && count < text.length) {
         const character = text[count++]!
         next += /[.!?…]/.test(character) ? 170 : /[,;:]/.test(character) ? 70 : character === '\n' ? 90 : character === ' ' ? 7 : 18
       }
       this.text.textContent = text.slice(0, count)
+      if (count > previous && /\S/.test(text.slice(previous, count))) this.element.dispatchEvent(new Event('interaction:typing', { bubbles: true }))
       if (count >= text.length) this.revealText()
       else this.typingFrame = requestAnimationFrame(tick)
     }
@@ -339,6 +347,7 @@ export class CampInteraction {
     }
     if (!world.useHouseObject(target.id)) return
     if (target.id === 'television') this.element.dispatchEvent(new Event('interaction:media', { bubbles: true }))
+    if (target.id === 'phone') { this.rememberFocus(); this.mode = 'phone'; this.housePhone.open(world); this.changed(); return }
     if (target.id === 'fridge') { this.openFridge(world); return }
     if (target.id === 'bed') {
       this.showDialogue('Кровать', 'Простыня всё ещё тёплая. Можно закрыть глаза. Только бы снова не оказаться в том лесу.', [

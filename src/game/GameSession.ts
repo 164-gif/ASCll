@@ -86,6 +86,12 @@ export class GameSession {
     this.audio.syncTelevision(this.world, true)
   }
 
+  private readonly handleTypingSound = (): void => { this.audio.dialogueTyping() }
+  private readonly handlePhoneSound = (event: Event): void => {
+    const { kind, digit } = (event as CustomEvent<{ kind: string; digit?: string }>).detail
+    this.audio.phoneSound(kind, digit)
+  }
+
   private readonly handleInteractionChange = (): void => { this.syncInputState() }
 
   private readonly handleVisibility = (): void => {
@@ -123,6 +129,8 @@ export class GameSession {
     this.map.element.addEventListener('world-map:close', this.handleMapClose)
     this.interaction.element.addEventListener('interaction:change', this.handleInteractionChange)
     this.interaction.element.addEventListener('interaction:media', this.handleMediaInteraction)
+    this.interaction.element.addEventListener('interaction:typing', this.handleTypingSound)
+    this.interaction.element.addEventListener('interaction:phone-sound', this.handlePhoneSound)
     document.addEventListener('visibilitychange', this.handleVisibility)
   }
 
@@ -149,6 +157,8 @@ export class GameSession {
     this.map.destroy()
     this.interaction.element.removeEventListener('interaction:change', this.handleInteractionChange)
     this.interaction.element.removeEventListener('interaction:media', this.handleMediaInteraction)
+    this.interaction.element.removeEventListener('interaction:typing', this.handleTypingSound)
+    this.interaction.element.removeEventListener('interaction:phone-sound', this.handlePhoneSound)
     this.interaction.destroy()
     this.hud.destroy()
     this.campEnhancer.destroy()

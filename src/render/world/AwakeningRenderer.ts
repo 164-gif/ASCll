@@ -29,6 +29,29 @@ void main() {
 }
 `
 
+// The television has its own fixed grid in UV space, independent of screen distance.
+const televisionFragment = /* glsl */ `
+uniform sampler2D uVideo;
+uniform sampler2D uAtlas;
+uniform sampler2D uDepth;
+uniform vec2 uResolution;
+varying vec2 vUv;
+void main() {
+  float sceneDepth = texture2D(uDepth, gl_FragCoord.xy / uResolution).x;
+  if (gl_FragCoord.z > sceneDepth + 0.00008) discard;
+  vec2 grid = vec2(120.0, 84.0);
+  vec2 cell = floor(vUv * grid);
+  vec2 sampleUv = (cell + 0.5) / grid;
+  vec3 color = pow(clamp(texture2D(uVideo, sampleUv).rgb * 2.4, 0.0, 1.0), vec3(0.55));
+  float luminance = dot(color, vec3(0.299, 0.587, 0.114));
+  float hash = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.54);
+  float index = clamp(floor(pow(luminance, 0.72) * 57.0 + hash * 4.0), 1.0, 63.0);
+  vec2 uv = (vec2(mod(index, 8.0), 7.0 - floor(index / 8.0)) + fract(vUv * grid)) / 8.0;
+  float glyph = texture2D(uAtlas, uv).r;
+  gl_FragColor = vec4(mix(vec3(0.009, 0.012, 0.011) + color * 0.045, color * 1.35, glyph), 1.0);
+}
+`
+
 export class AwakeningRenderer {
   readonly scene = new THREE.Scene()
   readonly camera = new THREE.PerspectiveCamera(67, 1, 0.05, 90)
@@ -39,6 +62,8 @@ export class AwakeningRenderer {
   private readonly canvas = document.createElement('canvas')
   private readonly televisionTexture: THREE.CanvasTexture
   private readonly televisionScreen: THREE.Mesh
+  private readonly televisionMaterial: THREE.ShaderMaterial
+  private readonly handset = new THREE.Group()
   private readonly televisionLight = new THREE.PointLight(0x9db8ab, 0, 5)
   private readonly tableLamp = new THREE.PointLight(0xe8cba3, 10, 11, 2)
   private readonly roomLights = [new THREE.PointLight(0xe1d6b8, 5, 7, 2), new THREE.PointLight(0xd0dbd5, 4, 7, 2)]
@@ -50,12 +75,16 @@ export class AwakeningRenderer {
   private playRequested = false
   private videoChannel = -1
   private readonly fridgeDoor = new THREE.Group()
+  private readonly curtains: { mesh: THREE.Mesh; windowIndex: number; side: number; center: number }[] = []
+  private seatBlend = 0
+  private hideBlend = 0
   private readonly bottles: THREE.Group[] = []
   private readonly handleVisibility = (): void => { if (document.hidden) { this.video.pause(); this.playRequested = false } }
   private lastBroadcastFrame = -1
   private readonly post: THREE.ShaderMaterial
 
   constructor(atlas: THREE.Texture) {
+    this.target.depthTexture = new THREE.DepthTexture(1, 1, THREE.UnsignedIntType)
     this.scene.background = new THREE.Color(0x101514)
     this.scene.fog = new THREE.FogExp2(0x101514, 0.038)
     this.scene.add(new THREE.HemisphereLight(0x9ea9ac, 0x302c23, 1.05))
@@ -88,8 +117,15 @@ export class AwakeningRenderer {
     this.videoTexture = new THREE.VideoTexture(this.video); this.videoTexture.colorSpace = THREE.SRGBColorSpace
     window.dispatchEvent(new CustomEvent('ascii:house-video', { detail: this.video }))
     document.addEventListener('visibilitychange', this.handleVisibility)
-    const screenMaterial = new THREE.MeshBasicMaterial({ map: this.televisionTexture, color: 0xc5d6ce }); this.materials.add(screenMaterial)
-    this.televisionScreen = this.box(tv, screenMaterial, -0.08, 0.49, 0.47, 0.9, 0.63, 0.012)
+    this.televisionMaterial = new THREE.ShaderMaterial({
+      vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+      fragmentShader: televisionFragment,
+      uniforms: { uVideo: { value: this.televisionTexture }, uAtlas: { value: atlas }, uDepth: { value: this.target.depthTexture }, uResolution: { value: new THREE.Vector2(1, 1) } },
+      depthTest: false, depthWrite: false,
+    })
+    this.materials.add(this.televisionMaterial)
+    this.televisionScreen = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.63), this.televisionMaterial)
+    this.televisionScreen.position.set(-0.08, 0.49, 0.479); this.televisionScreen.layers.set(1); tv.add(this.televisionScreen)
     for (const height of [0.29, 0.66]) this.box(tv, metal, 0.52, height, 0.46, 0.09, 0.09, 0.06)
     for (const side of [-1, 1]) {
       const antenna = this.box(tv, metal, side * 0.22, 1.18, -0.1, 0.02, 0.67, 0.02)
@@ -111,6 +147,14 @@ export class AwakeningRenderer {
     this.box(this.scene, dark, -3.7, 2.69, -3.3, 0.04, 0.4, 0.04)
     const kitchenShade = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.22, 12, 1, true), pale)
     kitchenShade.position.set(-3.7, 2.45, -3.3); this.scene.add(kitchenShade)
+    // Telephone on the living room table. The receiver lifts when the phone is used.
+    this.box(this.scene, dark, 3.65, 0.91, 5.32, 0.62, 0.16, 0.4)
+    this.box(this.scene, metal, 3.65, 1.005, 5.32, 0.43, 0.025, 0.27)
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) this.box(this.scene, dark, 3.52 + col * 0.13, 1.025, 5.24 + row * 0.08, 0.06, 0.02, 0.04)
+    this.handset.position.set(3.65, 1.08, 5.32)
+    this.box(this.handset, dark, 0, 0, 0, 0.5, 0.08, 0.09)
+    for (const side of [-1, 1]) this.box(this.handset, dark, side * 0.22, -0.04, 0, 0.12, 0.15, 0.14)
+    this.scene.add(this.handset)
     this.buildNote()
     this.post = new THREE.ShaderMaterial({
       vertexShader: 'varying vec2 vUv; void main(){vUv=uv;gl_Position=vec4(position.xy,0.0,1.0);}',
@@ -124,6 +168,7 @@ export class AwakeningRenderer {
   resize(width: number, height: number, dpr: number): void {
     this.target.setSize(Math.round(width * dpr), Math.round(height * dpr))
     this.post.uniforms.uResolution!.value.set(width * dpr, height * dpr)
+    this.televisionMaterial.uniforms.uResolution!.value.set(Math.round(width * dpr), Math.round(height * dpr))
     this.post.uniforms.uCell!.value.set(7 * dpr, 11 * dpr)
     this.camera.aspect = width / height; this.camera.updateProjectionMatrix()
   }
@@ -132,15 +177,40 @@ export class AwakeningRenderer {
     const house = world.house
     const progress = this.reducedMotion ? 1 : Math.min(1, house.elapsed / 2.6)
     const eased = progress * progress * (3 - 2 * progress)
+    const blendRate = this.reducedMotion ? 1 : Math.min(1, dt * 3.5)
+    this.seatBlend += ((house.seated ? 1 : 0) - this.seatBlend) * blendRate
+    this.hideBlend += ((house.hidden ? 1 : 0) - this.hideBlend) * blendRate
     this.camera.position.set(world.player.x, 0.72 + eased * 0.9, world.player.z)
-    this.camera.rotation.set(house.pitch - (1 - eased) * 0.26, -house.yaw, 0, 'YXZ')
+    this.camera.position.lerp(new THREE.Vector3(2.03, 1.05, 2.5), this.seatBlend)
+    let pitch = house.pitch - (1 - eased) * 0.26
+    let yaw = house.yaw
+    const seatYaw = Math.atan2(3.12, 1)
+    yaw += Math.atan2(Math.sin(seatYaw - yaw), Math.cos(seatYaw - yaw)) * this.seatBlend
+    pitch += (0.05 - pitch) * this.seatBlend
+    if (house.hidden) {
+      const view = house.hidden === 'bed' ? { x: -3.25, y: 0.32, z: 3.1, yaw: Math.PI / 2 } : house.hidden === 'table' ? { x: -4.4, y: 0.38, z: -2.2, yaw: Math.PI / 2 } : { x: 5.12, y: 1.15, z: -4.75, yaw: -Math.PI / 2 }
+      this.camera.position.lerp(new THREE.Vector3(view.x, view.y, view.z), this.hideBlend)
+      yaw += Math.atan2(Math.sin(view.yaw - yaw), Math.cos(view.yaw - yaw)) * this.hideBlend
+      pitch *= 1 - this.hideBlend
+    }
+    this.camera.rotation.set(pitch, -yaw, 0, 'YXZ')
     if (house.peeking) {
       this.camera.position.set(3.5, 1.65, -6.7); this.camera.rotation.set(0, 0, 0, 'YXZ')
     }
-    const fov = house.peeking ? 100 : 67
+    const fov = house.peeking ? 100 : 67 - this.seatBlend * 24
     if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix() }
     this.post.uniforms.uPeeking!.value = house.peeking ? 1 : 0
     this.fridgeDoor.rotation.y += ((house.fridgeOpen ? -Math.PI * 0.62 : 0) - this.fridgeDoor.rotation.y) * (this.reducedMotion ? 1 : Math.min(1, dt * 7))
+    for (const curtain of this.curtains) {
+      const closed = house.curtains[curtain.windowIndex] ? 1 : 0
+      const width = 0.4 + closed * 0.83
+      curtain.mesh.scale.z += (width / 0.4 - curtain.mesh.scale.z) * blendRate
+      curtain.mesh.position.z += (curtain.center + curtain.side * (1.2 - width / 2) - curtain.mesh.position.z) * blendRate
+    }
+    const handsetTarget = house.phoneLifted ? 1 : 0
+    const handsetMix = this.reducedMotion ? 1 : Math.min(1, dt * 5)
+    this.handset.position.y += ((1.08 + handsetTarget * 0.26) - this.handset.position.y) * handsetMix
+    this.handset.rotation.z += ((handsetTarget * -0.3) - this.handset.rotation.z) * handsetMix
     this.bottles.forEach((bottle, index) => { bottle.visible = index < house.beer })
     this.tableLamp.intensity = house.lampOn ? 10 : 0
     this.roomLights.forEach((light, index) => { light.intensity = house.lampOn ? index === 0 ? 5 : 4 : 0 })
@@ -148,15 +218,20 @@ export class AwakeningRenderer {
     this.televisionScreen.visible = house.tvOn
     this.televisionLight.intensity = house.tvOn ? 3.5 : 0
     this.syncTelevision(world)
-    const screenMaterial = this.televisionScreen.material as THREE.MeshBasicMaterial
     const map = HOUSE_TV_CHANNELS[house.tvChannel] && this.video.readyState >= 2 && !this.video.error ? this.videoTexture : this.televisionTexture
-    if (screenMaterial.map !== map) { screenMaterial.map = map; screenMaterial.needsUpdate = true }
+    this.televisionMaterial.uniforms.uVideo!.value = map
     const frame = Math.floor(house.elapsed * 8)
     if (house.tvOn && (frame !== this.lastBroadcastFrame || this.videoChannel !== house.tvChannel)) { this.lastBroadcastFrame = frame; this.drawBroadcast(house.elapsed) }
     renderer.shadowMap.enabled = true
     const previousTarget = renderer.getRenderTarget()
     renderer.setRenderTarget(this.target); renderer.render(this.scene, this.camera)
     renderer.setRenderTarget(previousTarget); renderer.render(this.screenScene, this.screenCamera)
+    if (house.tvOn && !house.peeking) {
+      const autoClear = renderer.autoClear, background = this.scene.background
+      renderer.autoClear = false; this.scene.background = null
+      this.camera.layers.set(1); renderer.render(this.scene, this.camera); this.camera.layers.set(0)
+      this.scene.background = background; renderer.autoClear = autoClear
+    }
   }
 
   syncTelevision(world: WorldState, fromGesture = false): void {
@@ -209,7 +284,10 @@ export class AwakeningRenderer {
         for (const y of [0.98, 1.65, 2.35]) this.box(this.scene, wood, part.x, y, windowZ, 0.28, 0.065, 2.4)
         const glass = new THREE.MeshStandardMaterial({ color: 0x9daeb1, transparent: true, opacity: 0.16, roughness: 0.35 }); this.materials.add(glass)
         this.box(this.scene, glass, part.x, 1.65, windowZ, 0.025, 1.3, 2.3)
-        for (const side of [-1, 1]) this.box(this.scene, dark, part.x * 0.98, 1.65, windowZ + side * 1.36, 0.12, 1.85, 0.4)
+        for (const side of [-1, 1]) {
+          const mesh = this.box(this.scene, dark, part.x * 0.98, 1.65, windowZ + side * 1.0, 0.12, 1.85, 0.4)
+          this.curtains.push({ mesh, windowIndex: part.x < 0 ? 0 : 1, side, center: windowZ })
+        }
       } else this.box(this.scene, wall, part.x, part.height / 2, part.z, part.width, part.height, part.depth)
     }
     for (const z of [-3.45, 3.05]) {

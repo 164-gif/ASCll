@@ -72,7 +72,7 @@ export class WorldState {
   awakeningPending = false
   readonly house = {
     yaw: 0, pitch: -0.08, elapsed: 0, radioOn: true, tvOn: false, tvChannel: 0, lampOn: true,
-    peeking: false, fridgeOpen: false, beer: 4, beersDrunk: 0, sleepHours: 0,
+    peeking: false, fridgeOpen: false, phoneLifted: false, seated: false, hidden: null as 'bed' | 'table' | 'wardrobe' | null, curtains: [false, false], hidingHint: false, beer: 4, beersDrunk: 0, sleepHours: 0,
     radioFrequency: 610, radioFine: 0, radioSettled: 0, noteRead: false,
   }
   interior: TownBuilding | null = null
@@ -130,13 +130,13 @@ export class WorldState {
   }
 
   lookInHouse(dx: number, dy: number): void {
-    if (this.chapter !== 'awakening') return
+    if (this.chapter !== 'awakening' || this.house.seated || this.house.hidden) return
     this.house.yaw = (this.house.yaw + dx * 0.0025) % (Math.PI * 2)
     this.house.pitch = Math.max(-1.15, Math.min(1.15, this.house.pitch - dy * 0.0025))
   }
 
   get houseTarget() {
-    if (this.chapter !== 'awakening' || this.house.peeking) return undefined
+    if (this.chapter !== 'awakening' || this.house.peeking || this.house.seated || this.house.hidden) return undefined
     return HOUSE_OBJECTS.map((object) => ({ object, dx: object.x - this.player.x, dz: object.z - this.player.z }))
       .filter(({ object, dx, dz }) => {
         const dy = object.y - 1.62, distance = Math.hypot(dx, dy, dz)
@@ -154,15 +154,37 @@ export class WorldState {
     if (id === 'lamp') this.house.lampOn = !this.house.lampOn
     if (id === 'door') this.house.peeking = true
     if (id === 'fridge') this.house.fridgeOpen = true
+    if (id === 'phone') this.house.phoneLifted = true
+    if (id === 'window-bedroom') this.house.curtains[0] = !this.house.curtains[0]
+    if (id === 'window-living') this.house.curtains[1] = !this.house.curtains[1]
+    if (id === 'sofa') { this.house.seated = true; this.house.tvOn = true }
+    if (id === 'wardrobe-bedroom' || id === 'wardrobe-living') this.notify('Дверца почему-то не открылась.')
     if (id === 'note') this.house.noteRead = true
     return true
   }
 
   nextTelevisionChannel(): boolean {
-    if (this.houseTarget?.id !== 'television' || !this.house.tvOn) return false
+    if ((!this.house.seated && this.houseTarget?.id !== 'television') || !this.house.tvOn) return false
     this.house.tvChannel = (this.house.tvChannel + 1) % HOUSE_TV_CHANNEL_COUNT
     this.notify(`Телевизор · канал ${this.house.tvChannel + 1}`)
     return true
+  }
+
+  get nearbyHidingPlace(): 'bed' | 'table' | 'wardrobe' | null {
+    if (this.chapter !== 'awakening' || this.house.seated || this.house.peeking) return null
+    const spots = [
+      { id: 'bed' as const, x: -4.5, z: 3.8, radius: 1.65 },
+      { id: 'table' as const, x: -4.4, z: -2.2, radius: 1.85 },
+      { id: 'wardrobe' as const, x: 5.15, z: -4.75, radius: 1.65 },
+    ]
+    return spots.filter((spot) => Math.hypot(spot.x - this.player.x, spot.z - this.player.z) < spot.radius && houseSightClear(this.player.x, this.player.z, spot.x, spot.z))
+      .sort((a, b) => Math.hypot(a.x - this.player.x, a.z - this.player.z) - Math.hypot(b.x - this.player.x, b.z - this.player.z))[0]?.id ?? null
+  }
+  toggleHiding(): boolean {
+    if (this.house.hidden) { this.house.hidden = null; return true }
+    const place = this.nearbyHidingPlace
+    if (!place) return false
+    this.house.hidden = place; return true
   }
 
   tuneRadio(delta: number, fine = false): void {
@@ -258,7 +280,8 @@ export class WorldState {
     this.elapsed += dt
     if (this.chapter === 'awakening') {
       this.house.elapsed += dt
-      if (this.house.elapsed < 1.6 || this.house.peeking) return
+      if (this.house.elapsed < 1.6 || this.house.peeking || this.house.seated || this.house.hidden) return
+      const previousRoom = houseRoomAt(this.player.x, this.player.z)
       const speed = input.running ? 3.2 : 2.25
       const c = Math.cos(this.house.yaw), s = Math.sin(this.house.yaw)
       const dx = (input.x * c - input.z * s) * speed * dt
@@ -266,6 +289,10 @@ export class WorldState {
       if (!houseBlocked(this.player.x + dx, this.player.z)) this.player.x += dx
       if (!houseBlocked(this.player.x, this.player.z + dz)) this.player.z += dz
       this.player.facing = Math.PI - this.house.yaw
+      if (this.house.beersDrunk > 0 && !this.house.hidingHint && previousRoom === 'кухня' && houseRoomAt(this.player.x, this.player.z) !== 'кухня') {
+        this.house.hidingHint = true
+        this.notify('R · можно прятаться под кроватью, под столом или в шкафу')
+      }
       return
     }
     this.updateResidents(dt)
