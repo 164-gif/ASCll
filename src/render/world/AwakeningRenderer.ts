@@ -84,7 +84,7 @@ export class AwakeningRenderer {
     this.box(tv, dark, -0.08, 0.48, 0.44, 1.05, 0.76, 0.04)
     this.canvas.width = 512; this.canvas.height = 384
     this.televisionTexture = new THREE.CanvasTexture(this.canvas)
-    this.video.loop = true; this.video.playsInline = true; this.video.preload = 'none'; this.video.muted = true
+    this.video.loop = true; this.video.playsInline = true; this.video.preload = 'none'; this.video.muted = false
     this.videoTexture = new THREE.VideoTexture(this.video); this.videoTexture.colorSpace = THREE.SRGBColorSpace
     window.dispatchEvent(new CustomEvent('ascii:house-video', { detail: this.video }))
     document.addEventListener('visibilitychange', this.handleVisibility)

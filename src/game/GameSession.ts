@@ -83,6 +83,7 @@ export class GameSession {
   private readonly handleMediaInteraction = (): void => {
     this.audio.resumeFromGesture()
     this.renderer.syncHouseMedia(this.world)
+    this.audio.syncTelevision(this.world, true)
   }
 
   private readonly handleInteractionChange = (): void => { this.syncInputState() }
@@ -192,6 +193,7 @@ export class GameSession {
     if (!document.hidden) this.world.updateHouseDevices(frameDt)
     this.audio.updateWorld(this.world, frameDt)
     this.renderer.render(this.world, frameDt)
+    this.audio.syncTelevision(this.world)
     this.hud.update(this.world)
     this.interaction.update(this.world)
     this.map.update(this.world)

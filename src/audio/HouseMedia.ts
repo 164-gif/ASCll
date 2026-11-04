@@ -6,6 +6,12 @@ export const HOUSE_TV_CHANNELS: readonly (string | undefined)[] = [
   tvFile('hfVf7uZseQT3kUXZ9Vmg+CW3BMvu1BOE.mp4'),
   undefined, // emergency broadcast generated in-game
 ]
+const televisionAudio = import.meta.glob<string>('/src/assets/tv-audio/channel-*.ogg', { eager: true, query: '?url', import: 'default' })
+export const HOUSE_TV_AUDIO: readonly (string | undefined)[] = [
+  televisionAudio['/src/assets/tv-audio/channel-1.ogg'],
+  televisionAudio['/src/assets/tv-audio/channel-2.ogg'],
+  undefined,
+]
 export const RADIO_MEDIA = import.meta.glob<string>('/src/assets/radio/*.{mp3,ogg,wav,m4a}', { eager: true, query: '?url', import: 'default' })
 export function radioMediaFor(id: string): string | undefined {
   return Object.entries(RADIO_MEDIA).find(([path]) => path.split('/').at(-1)?.replace(/\.[^.]+$/, '') === id)?.[1]

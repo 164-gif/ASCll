@@ -1,3 +1,4 @@
+import { HOUSE_TV_AUDIO } from './HouseMedia'
 import { HouseRadioAudio } from './HouseRadioAudio'
 import { AudioSettings, type AudioSettingsState } from '../core/AudioSettings'
 import type { WorldState } from '../simulation/WorldState'
@@ -40,52 +41,97 @@ export class AudioDirector {
   private nextCrackleAt = 0
   private houseRadio: HouseRadioAudio | null = null
   private televisionVideo: HTMLVideoElement | null = null
-  private televisionSource: MediaElementAudioSourceNode | null = null
-  private televisionNodes: AudioNode[] = []
+  private readonly televisionAudio = document.createElement('audio')
+  private televisionChannel = -1
+  private televisionAudioRequested = false
+  private televisionAudioFailed = false
+  private televisionAttempt = 0
+  private readonly handleTelevisionPause = (): void => {
+    this.televisionAttempt++
+    this.televisionAudio.pause(); this.televisionAudioRequested = false
+  }
+  private readonly handleTelevisionError = (): void => {
+    this.televisionAttempt++
+    this.televisionAudioFailed = true; this.televisionAudioRequested = false
+    this.televisionAudio.pause()
+    if (this.televisionVideo) this.televisionVideo.muted = false
+  }
   private readonly handleHouseVideo = (event: Event): void => {
-    this.disconnectTelevision()
+    this.detachTelevision()
     this.televisionVideo = (event as CustomEvent<HTMLVideoElement | null>).detail
-    this.connectTelevision()
+    if (this.televisionVideo) {
+      // Native media playback does not depend on AudioContext or its autoplay state.
+      this.televisionVideo.muted = false
+      this.televisionVideo.addEventListener('pause', this.handleTelevisionPause)
+      this.televisionVideo.addEventListener('waiting', this.handleTelevisionPause)
+      this.televisionChannel = -1
+      this.applyTelevisionVolume()
+    }
   }
 
-  private disconnectTelevision(): void {
-    this.televisionSource?.disconnect(); this.televisionSource = null
-    this.televisionNodes.forEach((node) => node.disconnect()); this.televisionNodes = []
+  private detachTelevision(): void {
+    this.televisionVideo?.removeEventListener('pause', this.handleTelevisionPause)
+    this.televisionVideo?.removeEventListener('waiting', this.handleTelevisionPause)
+    this.handleTelevisionPause()
+    this.televisionAudio.removeAttribute('src'); this.televisionAudio.load()
+    this.televisionVideo = null; this.televisionChannel = -1
   }
 
-  private connectTelevision(): void {
-    const video = this.televisionVideo, context = this.context, destination = this.worldSceneGain
-    if (!video || !context || !destination || this.televisionSource) return
-    const input = context.createGain(); input.gain.value = 2
-    const highpass = context.createBiquadFilter(); highpass.type = 'highpass'; highpass.frequency.value = 85
-    const lowpass = context.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.value = 5500
-    const compressor = context.createDynamicsCompressor()
-    compressor.threshold.value = -24; compressor.knee.value = 16; compressor.ratio.value = 5
-    compressor.attack.value = 0.006; compressor.release.value = 0.18
-    const output = context.createGain(); output.gain.value = 2.2
-    this.televisionSource = context.createMediaElementSource(video)
-    this.televisionSource.connect(input).connect(highpass).connect(lowpass).connect(compressor).connect(output).connect(destination)
-    this.televisionNodes = [input, highpass, lowpass, compressor, output]
-    video.muted = false
+  private applyTelevisionVolume(): void {
+    const volume = document.hidden && this.settings.muteWhenHidden ? 0 : this.settings.master * this.settings.effects
+    this.televisionAudio.volume = volume
+    if (this.televisionVideo) this.televisionVideo.volume = volume
+  }
+
+  syncTelevision(world: WorldState, fromGesture = false): void {
+    const video = this.televisionVideo
+    if (!video || world.chapter !== 'awakening') return
+    const channel = world.house.tvChannel
+    if (channel !== this.televisionChannel) {
+      this.handleTelevisionPause(); this.televisionChannel = channel; this.televisionAudioFailed = false
+      const url = HOUSE_TV_AUDIO[channel]
+      if (url) this.televisionAudio.src = url
+      else this.televisionAudio.removeAttribute('src')
+      this.televisionAudio.load()
+    }
+    const hasTrack = !!HOUSE_TV_AUDIO[channel] && !this.televisionAudioFailed
+    video.muted = hasTrack
+    if (!hasTrack || !world.house.tvOn || video.paused || document.hidden || video.readyState < 3) {
+      if (!this.televisionAudio.paused || this.televisionAudioRequested) this.handleTelevisionPause()
+      return
+    }
+    if (this.televisionAudio.readyState >= 1 && Math.abs(this.televisionAudio.currentTime - video.currentTime) > 0.18) {
+      this.televisionAudio.currentTime = video.currentTime
+    }
+    this.televisionAudio.playbackRate = video.playbackRate
+    if (fromGesture && this.televisionAudio.paused) this.televisionAudioRequested = false
+    if (!this.televisionAudioRequested) {
+      this.televisionAudioRequested = true
+      const attempt = ++this.televisionAttempt
+      void this.televisionAudio.play().catch(() => {
+        if (attempt === this.televisionAttempt && this.televisionVideo === video) this.handleTelevisionError()
+      })
+    }
   }
 
   resumeFromGesture(): void {
     if (!this.context) this.buildGraph()
     if (this.context?.state === 'suspended') void this.context.resume()
-    this.connectTelevision()
   }
 
   private readonly handleSettings = (event: Event): void => {
     const custom = event as CustomEvent<AudioSettingsState>
     this.settings = custom.detail
-    this.applySettings()
+    this.applySettings(); this.applyTelevisionVolume()
   }
 
   private readonly handleVisibility = (): void => {
-    this.applySettings()
+    this.applySettings(); this.applyTelevisionVolume()
   }
 
   constructor() {
+    this.televisionAudio.preload = 'auto'; this.televisionAudio.loop = true
+    this.televisionAudio.addEventListener('error', this.handleTelevisionError)
     window.addEventListener('ascii:house-video', this.handleHouseVideo)
     window.addEventListener('ascii:audio-settings', this.handleSettings)
     document.addEventListener('visibilitychange', this.handleVisibility)
@@ -254,7 +300,8 @@ export class AudioDirector {
 
   destroy(): void {
     this.houseRadio?.destroy(); this.houseRadio = null
-    this.disconnectTelevision(); this.televisionVideo = null
+    this.detachTelevision()
+    this.televisionAudio.removeEventListener('error', this.handleTelevisionError)
     window.removeEventListener('ascii:house-video', this.handleHouseVideo)
     window.removeEventListener('ascii:audio-settings', this.handleSettings)
     document.removeEventListener('visibilitychange', this.handleVisibility)
@@ -294,7 +341,6 @@ export class AudioDirector {
     this.musicFilter = musicFilter
     this.effectsGain = effectsGain
     this.worldSceneGain = worldSceneGain
-    this.connectTelevision()
     this.noiseBuffer = this.createNoiseBuffer(context, 7)
 
     this.riverGain = this.createLoopingNoise(worldSceneGain, 'lowpass', 1900, 0.72)

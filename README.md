@@ -87,6 +87,15 @@ See [`docs/architecture.md`](docs/architecture.md) for the planned runtime bound
 `xTwTStroCE6hzlFHBkqL+xl5GT3EeYgk.mp4` и `hfVf7uZseQT3kUXZ9Vmg+CW3BMvu1BOE.mp4`. Они проигрываются на телевизоре
 со звуком и тем же ASCII-фильтром, что и весь дом. Видео загружается только
 при включении телевизора. Если файла нет, остаётся аварийная заставка.
+Для звука с лёгкой обработкой рядом с роликами используются отдельные дорожки
+`src/assets/tv-audio/channel-1.ogg` и `channel-2.ogg`. Они воспроизводятся
+непосредственно браузером и синхронизируются с видео. Если дорожки отсутствуют
+или не поддерживаются браузером, используется исходный звук из MP4. Создать
+дорожку из ролика можно командой:
+
+```bash
+ffmpeg -i input.mp4 -vn -af 'highpass=f=85,lowpass=f=6500,loudnorm=I=-17:TP=-1.5:LRA=11' -c:a libopus -b:a 96k channel-1.ogg
+```
 
 Музыку для двух станций можно добавить как `src/assets/radio/music-1.mp3`
 и `src/assets/radio/music-2.mp3` (также поддерживаются `.ogg`, `.wav`, `.m4a`).
